@@ -1,5 +1,5 @@
 /*
- * $Id: $
+ * $Id$
  * bison input to generate reactd configuration file parser
  */
 
@@ -48,30 +48,30 @@ reactd:
 	;
 
 header:
-	version options				{ printf("bison Header\n"); }
+	version options
 	;
 	
 version:
-	VERSIONKEY FLOAT			{ printf("bison Version: %f\n", $2); }
+	VERSIONKEY FLOAT	{ printf("Version: %f\n", $2); }
 	;
 	
 options:
-	OPTIONSKEY { printf("bison Started options section\n"); } '{' { printf("bison found opening of section\n"); } option_lines '}'		{ printf("bison Finished options section\n"); }
+	OPTIONSKEY '{' option_lines '}'
 	;
 	
 option_lines:
-	option_lines ',' option_line { printf("bison Finished option_line\n"); }
-	| option_line { printf("bison Finished single option_line\n"); }
+	option_lines ',' option_line
+	| option_line
 	;
 	
 option_line:
-	PIDFILEKEY '=' STRING			{ printf("bison Option pidfile: %s\n", $3); }
-	| MAILKEY '=' STRING			{ printf("bison Option mail: %s\n", $3); }
-	| LOGKEY '=' STRING	 		{ printf("bison Option log: %s\n", $3); }
+	PIDFILEKEY '=' STRING			{ printf("Option pidfile: '%s'\n", $3); }
+	| MAILKEY '=' STRING			{ printf("Option mail: '%s'\n", $3); }
+	| LOGKEY '=' STRING	 		{ printf("Option log: '%s'\n", $3); }
 	;
 	
 body:
-	file_entries				{ printf("bison finished Body\n"); }
+	file_entries
 	;
 	
 file_entries:
@@ -80,7 +80,7 @@ file_entries:
 	;
 	
 file_entry:
-	STRING { printf("bison started file section: %s\n", $1); } '{' re_entries '}'		{ printf("bison finished FILE section: %s\n", $1); }
+	STRING '{' re_entries '}'	{ printf("finished FILE section: '%s'\n", $1); }
 	;
 	
 re_entries:
@@ -89,7 +89,7 @@ re_entries:
 	;
 	
 re_entry:
-	STRING { printf("bison started re_entry: %s\n", $1); } '{' re_options '}'	{ printf("bison finished re_entry: %s\n", $1); }
+	STRING '{' re_options '}'	{ printf("finished re_entry: '%s'\n", $1); }
 	;
 	
 re_options:
@@ -98,14 +98,14 @@ re_options:
 	;
 	
 re_option:
-	COMMANDKEY '=' STRING		{ printf("bison RE command: %s\n", $3); }
-	| MAILKEY '=' STRING		{ printf("bison RE mail: %s\n", $3); }
+	COMMANDKEY '=' STRING		{ printf("RE command: '%s'\n", $3); }
+	| MAILKEY '=' STRING		{ printf("RE mail: '%s'\n", $3); }
 	| threshold
 	|
 	;
 	
 threshold:
-	THRESHOLDKEY '{' threshold_options '}'	{ printf("bison Threshold section\n"); }
+	THRESHOLDKEY '{' threshold_options '}'
 	;
 	
 threshold_options:
@@ -114,10 +114,10 @@ threshold_options:
 	;
 	
 threshold_option:
-	KEYKEY '=' STRING			{ printf("bison Threshold key: %s\n", $3); }
-	| COUNTKEY '=' INT			{ printf("bison Threshold count: %d\n", $3); }
-	| PERIODKEY '=' PERIOD			{ printf("bison Threshold period\n", $3); }
-	| RESETKEY '{' reset_options '}'	{ printf("bison Threshold reset section\n"); }
+	KEYKEY '=' STRING			{ printf("Threshold key: '%s'\n", $3); }
+	| COUNTKEY '=' INT			{ printf("Threshold count: %d\n", $3); }
+	| PERIODKEY '=' PERIOD			{ printf("Threshold period: %d\n", $3); }
+	| RESETKEY '{' reset_options '}'
 	;
 	
 reset_options:
@@ -126,8 +126,8 @@ reset_options:
 	;
 	
 reset_option:
-	PERIODKEY '=' PERIOD			{ printf("bison Reset time\n"); }
-	| COMMANDKEY '=' STRING			{ printf("bison Reset command: %s\n", $3); }
+	PERIODKEY '=' PERIOD			{ printf("Reset time %d\n", $3); }
+	| COMMANDKEY '=' STRING			{ printf("Reset command: '%s'\n", $3); }
 	;
 	
 %%
@@ -140,10 +140,10 @@ int main(int argc, char *argv[]) {
 		printf("Syntax: reactd <config file>\n");
 		return(1);
 	}
-	printf("Will parse %s\n", argv[1]);
+	printf("Will parse '%s'\n", argv[1]);
 	file = fopen(argv[1], "r");
 	if (file == NULL) {
-		printf("Could not open %s: %s\n", argv[1], strerror(errno));
+		printf("Could not open '%s': %s\n", argv[1], strerror(errno));
 		return(1);
 	}
 	yyin = file;
