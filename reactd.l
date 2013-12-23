@@ -50,5 +50,6 @@ reset		{ printf("flex will return reset key\n"); return RESETKEY; }
 		}
 [\{\},=]		{ printf("flex will return a single character: %s\n", yytext); return yytext[0]; }
 .		{ printf("flex will discard this: %s\n", yytext); }
+#.*		{ printf("flex will discard this as a comment: %s\n", yytext); }
 
 %%
