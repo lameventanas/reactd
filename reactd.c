@@ -1,5 +1,5 @@
 /*
- * %Id: $
+ * $Id$
  *
  */
 
@@ -9,9 +9,6 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-/*
- * $Id$
- */
 
 #include <fcntl.h>
 #include <ctype.h>
@@ -23,19 +20,22 @@
 
 #include "reactd.h"
 
+extern FILE *yyin;
+
 static void __attribute__ ((__noreturn__)) usage(FILE *out)
 {
 	fprintf(out,
-		_("\nUsage:\n"
-		" %s [option] file\n"),
-	 PROGRAM_NAME);
+		"\nUsage:\n"
+		" %s [option] file\n",
+	PROGRAM_NAME);
 	
-	fprintf(out, _(
+	fprintf(out,
 		"\nOptions:\n"
+		" -c, --config FILE   configuration file (default: %s)\n"
 		" -n, --lines NUMBER  output the last NUMBER lines\n"
 		" -NUMBER             same as `-n NUMBER'\n"
 		" -V, --version       output version information and exit\n"
-		" -h, --help          display this help and exit\n\n"));
+		" -h, --help          display this help and exit\n\n", DEFAULT_CONFIG);
 	
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
@@ -62,34 +62,48 @@ int main(int argc, char **argv) {
 				exit(0);
 			case 'h':
 				usage(stdout);
-			default:
+				PROGRAM_NAMEdefault:
 				usage(stderr);
 	}
 	
 	parseConfig(config);
+	
+	int i, j;
+	for (i = 0; i < MAXFILES; i++) {
+		if (files[i].filename == NULL)
+			break;
+		printf("* File: %s\n", files[i].filename);
+		for (j = 0; j < MAXREACTIONS; j++) {
+			if (files[i].reactions[j].re_str == NULL)
+				break;
+			printf("    * RE: %s\n", files[i].reactions[j].re_str);
+			printf("    * cmd: %s\n", files[i].reactions[j].cmd);
+			printf("    * mail: %s\n", files[i].reactions[j].mail);
+			if (files[i].reactions[j].threshold != NULL) {
+				printf("    * threshold key: %s\n", files[i].reactions[j].threshold->key);
+				printf("    * threshold count: %d\n", files[i].reactions[j].threshold->count);
+				printf("    * threshold period: %d\n", files[i].reactions[j].threshold->period);
+				if (files[i].reactions[j].threshold->reset != NULL) {
+					printf("    * threshold reset period: %d\n", files[i].reactions[j].threshold->reset->period);
+					printf("    * threshold reset cmd: %d\n", files[i].reactions[j].threshold->reset->cmd);
+				}
+			}
+		}
+	}
 	
 	return EXIT_SUCCESS;
 }
 
 
 int parseConfig(char *configfile) {
-	FILE *config;
-	char line[MAXCONFIGLINE];
-	char *p;
-	
-	config = fopen(configfile, "r");
-	if (config == NULL) {
+	yyin = fopen(configfile, "r");
+	if (yyin == NULL) {
 		fprintf(stderr, "Error opening %s: %s\n", configfile, strerror(errno));
 		return 1;
 	}
-	
-	while (fgets(line, MAXCONFIGLINE, config)) {
-		p = line;
-		while ((*p == ' ' || *p == '\t') && (p - line < strlen(line)))
-			p++;
-		
-	}
-	fclose(config);
-	
-	
+	do {
+		yyparse();
+	} while (!feof(yyin));
+	fclose(yyin);
+	return 0;
 }

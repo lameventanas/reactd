@@ -4,7 +4,7 @@
  */
 
 %{
-#include "reactd.tab.h"
+#include "reactd_conf.tab.h"
 
 int linenr = 1;
 

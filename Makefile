@@ -4,15 +4,14 @@ CFLAGS = -ggdb -pipe
 
 all: reactd
 
-reactd.tab.c reactd.tab.h: reactd.y
-	bison -d reactd.y
-#	bison --verbose --debug -d reactd.y
+reactd_conf.tab.c reactd.tab.h: reactd_conf.y
+	bison -d reactd_conf.y
 
-reactd.lex.yy.c: reactd.l reactd.tab.h
-	flex -o reactd.lex.yy.c reactd.l
+reactd_conf.lex.yy.c: reactd_conf.l reactd.tab.h
+	flex -o reactd_conf.lex.yy.c reactd_conf.l
 
-reactd: reactd.lex.yy.c reactd.tab.c reactd.tab.h
-	gcc $(CFLAGS) reactd.tab.c reactd.lex.yy.c -lfl -o reactd
+reactd: reactd_conf.lex.yy.c reactd_conf.tab.c reactd_conf.tab.h reactd.c
+	gcc $(CFLAGS) reactd_conf.tab.c reactd_conf.lex.yy.c reactd.c -lfl -o reactd
 
 clean:
-	rm -f reactd.tab.c reactd.tab.h reactd.lex.yy.c reactd
+	rm -f reactd_conf.tab.c reactd_conf.tab.h reactd_conf.lex.yy.c reactd

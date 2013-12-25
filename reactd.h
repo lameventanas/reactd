@@ -11,21 +11,32 @@
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 
-#define MAXCONFIGLINE 1024
-#define MAXFILES 16
-#define MAXREACTIONS 32
+#define MAXFILES 64
+#define MAXREACTIONS 64
 
 #include <pcre.h>
 
 typedef struct {
-	pcre *re;
+	int period;
 	char *cmd;
-	char *args;
-} treaction;
+} treset;
 
 typedef struct {
+	char *key;
+	int count;
+	int period;
+	treset *reset;
+} tthreshold;
+
+struct {
 	char *filename;
-	treaction reactions[MAXREACTIONS];
-} tmonitor_file;
+	struct {
+		char *re_str;
+		pcre *re;
+		char *cmd;
+		char *mail;
+		tthreshold *threshold;
+	} reactions[MAXREACTIONS];
+} files[MAXFILES];
 
 #endif
