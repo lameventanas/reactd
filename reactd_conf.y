@@ -19,6 +19,14 @@ int renr;
 void yyerror(const char *s);
 int yydebug=1;
 
+/*
+extern tfile files[MAXFILES];
+extern char *pidfile;
+extern char *mail;
+extern char *logging;
+extern float version;
+*/
+
 %}
 %define parse.error verbose
 
@@ -56,7 +64,7 @@ header:
 	;
 	
 version:
-	VERSIONKEY FLOAT	{ printf("Version: %f\n", $2); }
+	VERSIONKEY FLOAT	{ version = $2; }
 	;
 	
 options:
@@ -69,9 +77,9 @@ option_lines:
 	;
 	
 option_line:
-	PIDFILEKEY '=' STRING			{ printf("Option pidfile: '%s'\n", $3); }
-	| MAILKEY '=' STRING			{ printf("Option mail: '%s'\n", $3); }
-	| LOGKEY '=' STRING	 		{ printf("Option log: '%s'\n", $3); }
+	PIDFILEKEY '=' STRING	{ pidfile = $3; }
+	| MAILKEY '=' STRING	{ mail = $3; }
+	| LOGKEY '=' STRING	{ logging = $3; }
 	;
 	
 body:
@@ -84,7 +92,17 @@ file_entries:
 	;
 	
 file_entry:
-	STRING { files[filenr].filename = $1; } '{' re_entries '}'	{ printf("finished FILE section: '%s'\n", $1); filenr++; renr=0; }
+	STRING	{
+			dprintf("starting file section: '%s' filenr: %d\n", $1, filenr);
+			files[filenr].filename = $1;
+		}
+	'{'
+	re_entries
+	'}'	{
+			dprintf("finished file section: '%s'\n", $1);
+			filenr++;
+			renr=0;
+		}
 	;
 	
 re_entries:
@@ -93,7 +111,16 @@ re_entries:
 	;
 	
 re_entry:
-	STRING { files[filenr].reactions[renr].re_str = $1; } '{' re_options '}'	{ printf("finished re_entry: '%s'\n", $1); renr++; }
+	STRING	{
+			dprintf("starting re section: '%s' renr: %d\n", $1, renr);
+			files[filenr].reactions[renr].re_str = $1;
+		}
+	'{'
+	re_options
+	'}'	{
+			dprintf("finished re section: '%s'\n", $1);
+			renr++;
+		}
 	;
 	
 re_options:
@@ -102,20 +129,27 @@ re_options:
 	;
 	
 re_option:
-	COMMANDKEY '=' STRING		{ printf("RE command: '%s'\n", $3); files[filenr].reactions[renr].cmd = $3; }
-	| MAILKEY '=' STRING		{ printf("RE mail: '%s'\n", $3); files[filenr].reactions[renr].mail = $3; }
+	COMMANDKEY '=' STRING	{
+					dprintf("re command: '%s'\n", $3);
+					files[filenr].reactions[renr].cmd = $3;
+				}
+	| MAILKEY '=' STRING	{
+					dprintf("re mail: '%s'\n", $3);
+					files[filenr].reactions[renr].mail = $3;
+				}
 	| threshold
 	|
 	;
 	
 threshold:
-	THRESHOLDKEY {
-		if (files[filenr].reactions[renr].threshold != NULL) {
-			printf("Only one threshold is allowed per RE\n"); // TODO: bail out here somehow
-		} else {
-			files[filenr].reactions[renr].threshold = calloc(1, sizeof(tthreshold));
-		}
-	} '{' threshold_options '}'
+	THRESHOLDKEY	{
+				dprintf("starting threshold section\n");
+			}
+	'{'
+	threshold_options
+	'}'		{
+				dprintf("finished threshold section\n");
+			}
 	;
 	
 threshold_options:
@@ -124,16 +158,26 @@ threshold_options:
 	;
 	
 threshold_option:
-	KEYKEY '=' STRING			{ printf("Threshold key: '%s'\n", $3); files[filenr].reactions[renr].threshold->key = $3; }
-	| COUNTKEY '=' INT			{ printf("Threshold count: %d\n", $3); files[filenr].reactions[renr].threshold->count = $3; }
-	| PERIODKEY '=' PERIOD			{ printf("Threshold period: %d\n", $3); files[filenr].reactions[renr].threshold->period = $3; }
-	| RESETKEY {
-		if (files[filenr].reactions[renr].threshold->reset != NULL) {
-			printf("Only one reset is allowed per threshold\n"); // TODO: bail out here somehow
-		} else {
-			files[filenr].reactions[renr].threshold->reset = calloc(1, sizeof(treset));
+	KEYKEY '=' STRING	{
+					dprintf("threshold key: '%s'\n", $3);
+					files[filenr].reactions[renr].threshold.key = $3;
+				}
+	| COUNTKEY '=' INT	{
+					dprintf("threshold count: %d\n", $3);
+					files[filenr].reactions[renr].threshold.count = $3;
+				}
+	| PERIODKEY '=' PERIOD	{
+					dprintf("threshold period: %d\n", $3);
+					files[filenr].reactions[renr].threshold.period = $3;
+				}
+	| RESETKEY
+	'{'	{
+			dprintf("starting reset section\n");
 		}
-	} '{' reset_options '}'
+	reset_options
+	'}'	{
+			dprintf("finished reset section\n");
+		}
 	;
 	
 reset_options:
@@ -142,8 +186,14 @@ reset_options:
 	;
 	
 reset_option:
-	PERIODKEY '=' PERIOD			{ printf("Reset time %d\n", $3); files[filenr].reactions[renr].threshold->reset->period = $3; }
-	| COMMANDKEY '=' STRING			{ printf("Reset command: '%s'\n", $3); files[filenr].reactions[renr].threshold->reset->cmd = $3; }
+	PERIODKEY '=' PERIOD	{
+					dprintf("reset time %d\n", $3);
+					files[filenr].reactions[renr].threshold.reset.period = $3;
+				}
+	| COMMANDKEY '=' STRING	{
+					dprintf("reset command: '%s'\n", $3);
+					files[filenr].reactions[renr].threshold.reset.cmd = $3;
+				}
 	;
 	
 %%

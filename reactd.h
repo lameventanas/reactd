@@ -17,26 +17,33 @@
 #include <pcre.h>
 
 typedef struct {
-	int period;
-	char *cmd;
-} treset;
-
-typedef struct {
-	char *key;
-	int count;
-	int period;
-	treset *reset;
-} tthreshold;
-
-struct {
 	char *filename;
 	struct {
 		char *re_str;
 		pcre *re;
 		char *cmd;
 		char *mail;
-		tthreshold *threshold;
+		struct {
+			char *key;
+			int count;
+			int period;
+			struct {
+				int period;
+				char *cmd;
+			} reset;
+		} threshold;
 	} reactions[MAXREACTIONS];
-} files[MAXFILES];
+} tfile;
 
+tfile files[MAXFILES];
+char *pidfile;
+char *mail;
+char *logging;
+float version;
+
+#ifdef DEBUG
+#define dprintf printf
+#else
+#define dprintf
+#endif
 #endif

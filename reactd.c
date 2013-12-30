@@ -66,28 +66,34 @@ int main(int argc, char **argv) {
 				usage(stderr);
 	}
 	
+	version = 0;
+	pidfile = NULL;
+	mail = NULL;
+	logging = NULL;
 	parseConfig(config);
 	
+	printf("\n---\nParsed configuration:\n\n");
+	printf("version: %f\n", version);
+	printf("pidfile: %f\n", pidfile);
+	printf("logging: %f\n", logging);
 	int i, j;
 	for (i = 0; i < MAXFILES; i++) {
+		printf("Checking filenr %d\n", i);
 		if (files[i].filename == NULL)
 			break;
 		printf("* File: %s\n", files[i].filename);
 		for (j = 0; j < MAXREACTIONS; j++) {
+			printf("Checking renr %d\n", j);
 			if (files[i].reactions[j].re_str == NULL)
 				break;
 			printf("    * RE: %s\n", files[i].reactions[j].re_str);
 			printf("    * cmd: %s\n", files[i].reactions[j].cmd);
 			printf("    * mail: %s\n", files[i].reactions[j].mail);
-			if (files[i].reactions[j].threshold != NULL) {
-				printf("    * threshold key: %s\n", files[i].reactions[j].threshold->key);
-				printf("    * threshold count: %d\n", files[i].reactions[j].threshold->count);
-				printf("    * threshold period: %d\n", files[i].reactions[j].threshold->period);
-				if (files[i].reactions[j].threshold->reset != NULL) {
-					printf("    * threshold reset period: %d\n", files[i].reactions[j].threshold->reset->period);
-					printf("    * threshold reset cmd: %d\n", files[i].reactions[j].threshold->reset->cmd);
-				}
-			}
+			printf("    * threshold key: %s\n", files[i].reactions[j].threshold.key);
+			printf("    * threshold count: %d\n", files[i].reactions[j].threshold.count);
+			printf("    * threshold period: %d\n", files[i].reactions[j].threshold.period);
+			printf("    * threshold reset period: %d\n", files[i].reactions[j].threshold.reset.period);
+			printf("    * threshold reset cmd: %d\n", files[i].reactions[j].threshold.reset.cmd);
 		}
 	}
 	
