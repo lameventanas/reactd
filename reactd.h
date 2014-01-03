@@ -5,6 +5,8 @@
 #ifndef REACTD_H
 #define REACTD_H
 #define DEFAULT_CONFIG "/etc/reactd.conf"
+#define DEFAULT_PIDFILE "/var/run/reactd/reactd.pid"
+#define DEFAULT_STATEFILE "/var/run/reactd/reactd.db"
 
 #define VERSION "0.1"
 #define PROGRAM_NAME "reactd"
@@ -16,10 +18,26 @@
 
 #include <pcre.h>
 
+#include <sys/inotify.h>
+// for NAME_MAX:
+#include <limits.h>
+
+// for strchr:
+#include <string.h>
+
+// #define INOTIFY_EVENTS		(IN_MODIFY|IN_DELETE_SELF|IN_MOVE_SELF|IN_UNMOUNT)
+#define INOTIFY_EVENTS		IN_MODIFY
+#define INOTIFY_NEVENTS_NUM	4
+
+#include <poll.h>
+
+#include <assert.h>
+
 typedef struct {
-	char *filename;
+	char *name;
+	int renum;
 	struct {
-		char *re_str;
+		char *str;
 		pcre *re;
 		char *cmd;
 		char *mail;
@@ -33,9 +51,17 @@ typedef struct {
 			} reset;
 		} threshold;
 	} reactions[MAXREACTIONS];
+	off_t pos; // position read until now
+	int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
 } tfile;
 
 tfile files[MAXFILES];
+
+struct pollfd pollwatch; // used to store inotify file descriptor and to poll it for read events
+int unwatchedfiles; // number of unwatched files (files in the config file but that are not being watched because they don't exist)
+
+int filenum; // number of files we are watching
+
 char *pidfile;
 char *mail;
 char *logging;

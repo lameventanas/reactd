@@ -14,9 +14,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
-#ifdef HAVE_INOTIFY_INIT
-#include <sys/inotify.h>
-#endif
 
 #include "reactd.h"
 
@@ -31,22 +28,111 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 	
 	fprintf(out,
 		"\nOptions:\n"
-		" -c, --config FILE   configuration file (default: %s)\n"
-		" -n, --lines NUMBER  output the last NUMBER lines\n"
-		" -NUMBER             same as `-n NUMBER'\n"
-		" -V, --version       output version information and exit\n"
-		" -h, --help          display this help and exit\n\n", DEFAULT_CONFIG);
+		" -c, --config FILE      configuration file (default: %s)\n"
+		" -p, --pidfile FILE     pid file (default: %s)\n"
+		" -s, --statefile FILE   state file (default: %s)\n"
+		" -V, --version          output version information and exit\n"
+		" -h, --help             display this help and exit\n\n", DEFAULT_CONFIG, DEFAULT_PIDFILE, DEFAULT_STATEFILE);
 	
 	exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
+}
+
+int parseConfig(char *configfile) {
+	int ret;
+	filenum = 0;
+	version = 0;
+	pidfile = NULL;
+	mail = NULL;
+	logging = NULL;
+	
+	dprintf("Initializing %d bytes in 0x%x\n", sizeof(files), files);
+	memset(files, 0, sizeof(files));
+	
+	yyin = fopen(configfile, "r");
+	if (yyin == NULL) {
+		fprintf(stderr, "Error opening %s: %s\n", configfile, strerror(errno));
+		return 1;
+	}
+	ret = yyparse();
+	fclose(yyin);
+	return ret;
+}
+
+
+void react(tfile *file) {
+	struct stat st;
+	int fd;
+	char buf[10];
+	int r;
+	char *end;
+	
+	dprintf("Reacting on file %s\n", file->name);
+	// check if the file was truncated
+	if (-1 == stat(file->name, &st))
+		return;
+	if (st.st_size < file->pos) {
+		dprintf("File %s shrunk, reseting\n", file->name);
+		file->pos = 0;
+	}
+	
+	fd = open(file->name, O_RDONLY);
+	if (fd == -1) {
+		fprintf(stderr, "Error opening %s: %s\n", file->name, strerror(errno));
+		return;
+	}
+	
+	do {
+		dprintf("Seeking %s to position %d\n", file->name, file->pos);
+		if (-1 == lseek(fd, file->pos, SEEK_SET)) {
+			fprintf(stderr, "Error seeking %s to position %d: %s\n", file->name, file->pos, strerror(errno));
+			close(fd);
+		}
+		r = read(fd, buf, sizeof(buf));
+		dprintf("Read %d bytes\n", r);
+		
+		if (r == -1) {
+			fprintf(stderr, "Error reading from %s: %s\n", file->name, strerror(errno));
+			close(fd);
+			return;
+		}
+		if (r > 0) {
+			end = strchr(buf, 0xa);
+			if (end == NULL) {
+				if (r == sizeof(buf)) { // if filled the buffer but there is no newline, process the whole buffer as if it is a complete line
+					dprintf("Buffer is full but no newline found, taking whole buffer\n");
+					buf[sizeof(buf) - 1] = 0;
+					dprintf("Got string of %d bytes\n", strlen(buf));
+					dprintf(" ---> '%s'\n", buf);
+					file->pos += strlen(buf);
+				} else { // read a partial line, ignore until another write adds a \n
+					dprintf("Partial string: '");
+					int z;
+					for (z=0; z<r; z++)
+						printf("%c", buf[z]);
+					printf("'\n");
+					close(fd);
+					return;
+				}
+			} else {
+				*end = 0; // null terminate string
+				dprintf("Got string of %d bytes\n", strlen(buf));
+				dprintf(" ---> '%s'\n", buf);
+				file->pos += strlen(buf) + 1;
+			}
+		}
+		
+	} while (r > 0);
+	close(fd);
 }
 
 int main(int argc, char **argv) {
 	char *config = DEFAULT_CONFIG;
 	int ch;
-	struct stat st;
 	
 	static const struct option longopts[] = {
 		{ "config",	required_argument,	0, 'c' },
+		{ "pidfile",	required_argument,	0, 'p' },
+		{ "statefile",	required_argument,	0, 's' },
 		{ "version",	no_argument,		0, 'V' },
 		{ "help",	no_argument,		0, 'h' },
 		{ NULL,		0, 0, 0 }
@@ -66,50 +152,133 @@ int main(int argc, char **argv) {
 				usage(stderr);
 	}
 	
-	version = 0;
-	pidfile = NULL;
-	mail = NULL;
-	logging = NULL;
-	parseConfig(config);
+	if (0 != parseConfig(config)) {
+		printf("Error parsing %s\n", config);
+		return 1;
+	}
 	
-	printf("\n---\nParsed configuration:\n\n");
-	printf("version: %f\n", version);
-	printf("pidfile: %f\n", pidfile);
-	printf("logging: %f\n", logging);
+	dprintf("Global options:\nversion: %f\npidfile: %s\nlogging: %s\n", version, pidfile, logging);
 	int i, j;
-	for (i = 0; i < MAXFILES; i++) {
-		printf("Checking filenr %d\n", i);
-		if (files[i].filename == NULL)
-			break;
-		printf("* File: %s\n", files[i].filename);
-		for (j = 0; j < MAXREACTIONS; j++) {
-			printf("Checking renr %d\n", j);
-			if (files[i].reactions[j].re_str == NULL)
-				break;
-			printf("    * RE: %s\n", files[i].reactions[j].re_str);
-			printf("    * cmd: %s\n", files[i].reactions[j].cmd);
-			printf("    * mail: %s\n", files[i].reactions[j].mail);
-			printf("    * threshold key: %s\n", files[i].reactions[j].threshold.key);
-			printf("    * threshold count: %d\n", files[i].reactions[j].threshold.count);
-			printf("    * threshold period: %d\n", files[i].reactions[j].threshold.period);
-			printf("    * threshold reset period: %d\n", files[i].reactions[j].threshold.reset.period);
-			printf("    * threshold reset cmd: %d\n", files[i].reactions[j].threshold.reset.cmd);
+	for (i = 0; i < filenum; i++) {
+		dprintf(" * File %d: %s\n", i, files[i].name);
+		
+		for (j = 0; j < files[i].renum; j++) {
+			dprintf("    * re %d: %s\n", j, files[i].reactions[j].str);
+			dprintf("       * cmd: %s\n", files[i].reactions[j].cmd);
+			dprintf("       * mail: %s\n", files[i].reactions[j].mail);
+			dprintf("       * threshold key: %s\n", files[i].reactions[j].threshold.key);
+			dprintf("       * threshold count: %d\n", files[i].reactions[j].threshold.count);
+			dprintf("       * threshold period: %d\n", files[i].reactions[j].threshold.period);
+			dprintf("       * threshold reset period: %d\n", files[i].reactions[j].threshold.reset.period);
+			dprintf("       * threshold reset cmd: %d\n", files[i].reactions[j].threshold.reset.cmd);
+		}
+	}
+
+	// Initialize global inotify fd and poll structure
+	pollwatch.fd = inotify_init();
+	pollwatch.events = POLLIN;
+	unwatchedfiles = filenum; // number of files not currently watched
+	
+	if (pollwatch.fd == -1) {
+		fprintf(stderr, "Error in inotify_init(): %s\n", strerror(errno));
+		exit(1);
+	}
+	
+	// Initialize watchfd for each file
+	for (i = 0; i < filenum; i++) {
+		files[i].watchfd = inotify_add_watch(pollwatch.fd, files[i].name, INOTIFY_EVENTS);
+		if (files[i].watchfd != -1) {
+			struct stat st;
+			if (-1 == stat(files[i].name, &st)) {
+				// if stat fails, unmonitor the file
+				files[i].watchfd = -1;
+				inotify_rm_watch(pollwatch.fd, files[i].watchfd);
+				files[i].watchfd = -1;
+			} else {
+				files[i].pos = st.st_size;
+				unwatchedfiles--;
+			}
 		}
 	}
 	
-	return EXIT_SUCCESS;
-}
+	char inotify_buf[ INOTIFY_EVENTS * (sizeof(struct inotify_event) + NAME_MAX + 1)];
+	ssize_t len;
+	int e;
+	
+	int pollret;
+	int polltimeout;
 
-
-int parseConfig(char *configfile) {
-	yyin = fopen(configfile, "r");
-	if (yyin == NULL) {
-		fprintf(stderr, "Error opening %s: %s\n", configfile, strerror(errno));
-		return 1;
+	while (1) {
+		polltimeout = unwatchedfiles > 0 ? 5000 : -1;
+		dprintf("%d files configured (%d unmonitored) timeout: %d\n", filenum, unwatchedfiles, polltimeout);
+		pollret = poll(&pollwatch, 1, polltimeout);
+		
+		if (pollret < 0) {
+			if (errno == EINTR || errno == EAGAIN) {
+				continue;
+			} else {
+				fprintf(stderr, "Error in poll: %s\n", strerror(errno));
+				exit(1);
+			}
+		}
+		
+		if (pollret == 0) { // timeout: check unmonitored files
+			// dprintf("Checking unwatched files\n");
+			int i;
+			for (i = 0; i < filenum && unwatchedfiles > 0; i++) {
+				if (files[i].watchfd == -1) {
+					// dprintf("Found unwatched file: %s\n", files[i].name);
+					files[i].watchfd = inotify_add_watch(pollwatch.fd, files[i].name, INOTIFY_EVENTS);
+					if (files[i].watchfd != -1) {
+						files[i].pos = 0;
+						dprintf("Now monitoring %s\n", files[i].name);
+						unwatchedfiles--;
+					}
+				}
+			}
+			continue; // back to polling
+		}
+		
+		// read inotify event(s)
+		len = read(pollwatch.fd, inotify_buf, sizeof(inotify_buf));
+		if (len < 0) {
+			if (errno == EINTR || errno == EAGAIN) {
+				continue;
+			} else {
+				fprintf(stderr, "Error reading inotify event: %s\n", strerror(errno));
+				exit(1);
+			}
+		}
+		// process each inotify event
+		for (e = 0; e < len; ) {
+			struct inotify_event *ev = (struct inotify_event *) &inotify_buf[e];
+			tfile *file = NULL;
+			
+			// first find affected file
+			int i;
+			for (i = 0; i < filenum; i++) {
+				if (files[i].watchfd == ev->wd) {
+					file = &files[i];
+					dprintf("Affected file: %s\n", file->name);
+					break;
+				}
+			}
+			assert(file != NULL); // could not find file associated with inotify event!
+			if (ev->mask & IN_MODIFY)  {
+				react(file);
+				
+			} else if (ev->mask & IN_IGNORED)  {
+				file->watchfd = -1;
+				dprintf("File %s is now unwatched\n", file->name);
+				unwatchedfiles++;
+			}
+			
+			
+			// move pointer to next event in buffer
+			e += sizeof(struct inotify_event) + ev->len;
+		}
 	}
-	do {
-		yyparse();
-	} while (!feof(yyin));
-	fclose(yyin);
-	return 0;
+	
+	
+	return EXIT_SUCCESS;
 }

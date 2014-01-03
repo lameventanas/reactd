@@ -50,3 +50,8 @@ reset		{ return RESETKEY; }
 #.*		; // ignore comments
 
 %%
+/*
+void yyerror(const char *s) {
+	printf("Error parsing line %d: %s\n---\n%s\n---", linenr, s, yytext);
+}
+*/
