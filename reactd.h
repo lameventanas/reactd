@@ -39,6 +39,7 @@ typedef struct {
 	struct {
 		char *str;
 		pcre *re;
+		pcre_extra *re_studied;
 		char *cmd;
 		char *mail;
 		struct {

@@ -62,7 +62,7 @@ int parseConfig(char *configfile) {
 void react(tfile *file) {
 	struct stat st;
 	int fd;
-	char buf[10];
+	char buf[8192];
 	int r;
 	char *end;
 	
@@ -100,11 +100,10 @@ void react(tfile *file) {
 			if (end == NULL) {
 				if (r == sizeof(buf)) { // if filled the buffer but there is no newline, process the whole buffer as if it is a complete line
 					dprintf("Buffer is full but no newline found, taking whole buffer\n");
-					buf[sizeof(buf) - 1] = 0;
-					dprintf("Got string of %d bytes\n", strlen(buf));
-					dprintf(" ---> '%s'\n", buf);
-					file->pos += strlen(buf);
-				} else { // read a partial line, ignore until another write adds a \n
+					end = &buf[sizeof(buf) - 1];
+					file->pos--; // re-read the last byte (because we will overwrite it in buf)
+				} /*
+				else { // read a partial line, ignore until another write adds a \n
 					dprintf("Partial string: '");
 					int z;
 					for (z=0; z<r; z++)
@@ -112,15 +111,26 @@ void react(tfile *file) {
 					printf("'\n");
 					close(fd);
 					return;
-				}
-			} else {
-				*end = 0; // null terminate string
-				dprintf("Got string of %d bytes\n", strlen(buf));
-				dprintf(" ---> '%s'\n", buf);
-				file->pos += strlen(buf) + 1;
+				} */
 			}
+			*end = 0; // null terminate string
+			file->pos += strlen(buf) + 1; // set next position to read from this file
+			dprintf(" ---> '%s' (%d bytes)\n", buf, strlen(buf));
+
+			// match against all possible REs for this file
+			int i;
+#define MAX_RE_RET 10
+			int re_ret[3 * MAX_RE_RET];
+			int matches;
+			for (i = 0; i < file->renum; i++) {
+				matches = pcre_exec(file->reactions[i].re, file->reactions[i].re_studied, buf, strlen(buf), 0, 0, re_ret, 3*MAX_RE_RET);
+				if (matches >= 0) {
+					dprintf("! String '%s' matched re '%s'\n", buf, file->reactions[i].str);
+					dprintf("! Running cmd: %s\n", files->reactions[i].cmd);
+				}
+			}
+			
 		}
-		
 	} while (r > 0);
 	close(fd);
 }
@@ -157,12 +167,27 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	
+	// pcre vars
+	const unsigned char *pcre_tables = pcre_maketables();
+	const char *error_msg;
+	int error_off;
+#define PCRE_OPTIONS 0
+	
 	dprintf("Global options:\nversion: %f\npidfile: %s\nlogging: %s\n", version, pidfile, logging);
 	int i, j;
 	for (i = 0; i < filenum; i++) {
 		dprintf(" * File %d: %s\n", i, files[i].name);
 		
 		for (j = 0; j < files[i].renum; j++) {
+			files[i].reactions[j].re = pcre_compile(files[i].reactions[j].str, PCRE_OPTIONS, &error_msg, &error_off, pcre_tables);
+			
+			if (! files[i].reactions[j].re) {
+				fprintf(stderr, "Error in regular expression '%s' at %d: %s\n", files[i].reactions[j].str, error_off, error_msg);
+				return 1;
+			}
+			
+			files[i].reactions[j].re_studied = pcre_study(files[i].reactions[j].re, 0, &error_msg);
+			
 			dprintf("    * re %d: %s\n", j, files[i].reactions[j].str);
 			dprintf("       * cmd: %s\n", files[i].reactions[j].cmd);
 			dprintf("       * mail: %s\n", files[i].reactions[j].mail);
