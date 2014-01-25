@@ -33,6 +33,8 @@
 
 #include <assert.h>
 
+#define MAX_THRESHOLD_COUNT 10 // maximum number of events per time period to remember
+
 typedef struct {
 	char *name;
 	int renum;
@@ -51,6 +53,11 @@ typedef struct {
 				char *cmd;
 			} reset;
 		} threshold;
+		struct {
+			int first; // first timestamp occurrance
+			int last; // last timestamp occurrance
+			time_t timestamp[MAX_THRESHOLD_COUNT]; // holds last threshold.count occurrances in a ring structure
+		} occurrances;
 	} reactions[MAXREACTIONS];
 	off_t pos; // position read until now
 	int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
