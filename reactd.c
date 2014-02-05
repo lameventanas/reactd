@@ -39,11 +39,13 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 
 int parseConfig(char *configfile) {
 	int ret;
-	filenum = 0;
+/*	filenum = 0;
 	version = 0;
 	pidfile = NULL;
 	mail = NULL;
 	logging = NULL;
+*/	
+	int i;
 	
 	dprintf("Initializing %d bytes in 0x%x\n", sizeof(files), files);
 	memset(files, 0, sizeof(files));
@@ -55,6 +57,7 @@ int parseConfig(char *configfile) {
 	}
 	ret = yyparse();
 	fclose(yyin);
+	
 	return ret;
 }
 
@@ -119,13 +122,20 @@ void react(tfile *file) {
 
 			// match against all possible REs for this file
 			int i;
-#define MAX_RE_RET 10
-			int re_ret[3 * MAX_RE_RET];
+			int re_ret[3 * MAX_RE_CAPTURES];
 			int matches;
 			for (i = 0; i < file->renum; i++) {
-				matches = pcre_exec(file->reactions[i].re, file->reactions[i].re_studied, buf, strlen(buf), 0, 0, re_ret, 3*MAX_RE_RET);
+				matches = pcre_exec(file->reactions[i].re, file->reactions[i].re_studied, buf, strlen(buf), 0, 0, re_ret, 3*MAX_RE_CAPTURES);
 				if (matches >= 0) {
 					dprintf("! String '%s' matched re '%s'\n", buf, file->reactions[i].str);
+					
+					// if there is a defined threshold, take not of the occurrance
+					if (file->reactions[i].threshold.period != 0) {
+						
+					}
+					
+					
+					
 					dprintf("! Running cmd: %s\n", files->reactions[i].cmd);
 				}
 			}

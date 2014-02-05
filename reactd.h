@@ -33,7 +33,16 @@
 
 #include <assert.h>
 
-#define MAX_THRESHOLD_COUNT 10 // maximum number of events per time period to remember
+#define MAX_RE_CAPTURES 10 // maximum number of RE captures
+
+/* this keeps track of matches for reactions with a defined threshold, its an unsorted single linked list */
+typedef struct {
+	char *key;
+	int first; // first timestamp occurrance (index to first in array)
+	int last; // last timestamp occurrance (index to last in array)
+	time_t *timestamp; // holds last threshold.count occurrances in a ring structure
+	threshold_occurrance *next;
+} threshold_occurrance;
 
 typedef struct {
 	char *name;
@@ -52,12 +61,8 @@ typedef struct {
 				int period;
 				char *cmd;
 			} reset;
+			threshold_occurrance *occurrances; // this structure is not read from the config file
 		} threshold;
-		struct {
-			int first; // first timestamp occurrance
-			int last; // last timestamp occurrance
-			time_t timestamp[MAX_THRESHOLD_COUNT]; // holds last threshold.count occurrances in a ring structure
-		} occurrances;
 	} reactions[MAXREACTIONS];
 	off_t pos; // position read until now
 	int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
