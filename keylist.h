@@ -1,6 +1,11 @@
 #ifndef KEYLIST_H
 #define KEYLIST_H
 
+/*
+ * keylist: single linked list using a string as key
+ * list is sorted alphabetically by the key
+ */
+
 typedef struct _keylist {
 	char *key;
 	void *value;
@@ -25,6 +30,5 @@ void *keylist_get(keylist **list, char *key);
  * key is freed
  */
 void *keylist_del(keylist **list, char *key);
-
 
 #endif
