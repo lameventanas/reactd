@@ -1,6 +1,5 @@
 /*
  * $Id$
- *
  */
 
 #include <stdio.h>
@@ -125,18 +124,18 @@ void react(tfile *file) {
 			int re_ret[3 * MAX_RE_CAPTURES];
 			int matches;
 			for (i = 0; i < file->renum; i++) {
-				matches = pcre_exec(file->reactions[i].re, file->reactions[i].re_studied, buf, strlen(buf), 0, 0, re_ret, 3*MAX_RE_CAPTURES);
+				matches = pcre_exec(file->re[i].re, file->re[i].re_studied, buf, strlen(buf), 0, 0, re_ret, 3*MAX_RE_CAPTURES);
 				if (matches >= 0) {
-					dprintf("! String '%s' matched re '%s'\n", buf, file->reactions[i].str);
+					dprintf("! String '%s' matched re '%s'\n", buf, file->re[i].str);
 					
 					// if there is a defined threshold, take not of the occurrance
-					if (file->reactions[i].threshold.period != 0) {
+					if (file->re[i].threshold.config.trigger_period != 0) {
 						
 					}
 					
 					
 					
-					dprintf("! Running cmd: %s\n", files->reactions[i].cmd);
+					dprintf("! Running cmd: %s\n", files->re[i].cmd);
 				}
 			}
 			
@@ -189,23 +188,24 @@ int main(int argc, char **argv) {
 		dprintf(" * File %d: %s\n", i, files[i].name);
 		
 		for (j = 0; j < files[i].renum; j++) {
-			files[i].reactions[j].re = pcre_compile(files[i].reactions[j].str, PCRE_OPTIONS, &error_msg, &error_off, pcre_tables);
+			files[i].re[j].re = pcre_compile(files[i].re[j].str, PCRE_OPTIONS, &error_msg, &error_off, pcre_tables);
 			
-			if (! files[i].reactions[j].re) {
-				fprintf(stderr, "Error in regular expression '%s' at %d: %s\n", files[i].reactions[j].str, error_off, error_msg);
+			if (! files[i].re[j].re) {
+				fprintf(stderr, "Error in regular expression '%s' at %d: %s\n", files[i].re[j].str, error_off, error_msg);
 				return 1;
 			}
 			
-			files[i].reactions[j].re_studied = pcre_study(files[i].reactions[j].re, 0, &error_msg);
+			files[i].re[j].re_studied = pcre_study(files[i].re[j].re, 0, &error_msg);
 			
-			dprintf("    * re %d: %s\n", j, files[i].reactions[j].str);
-			dprintf("       * cmd: %s\n", files[i].reactions[j].cmd);
-			dprintf("       * mail: %s\n", files[i].reactions[j].mail);
-			dprintf("       * threshold key: %s\n", files[i].reactions[j].threshold.key);
-			dprintf("       * threshold count: %d\n", files[i].reactions[j].threshold.count);
-			dprintf("       * threshold period: %d\n", files[i].reactions[j].threshold.period);
-			dprintf("       * threshold reset period: %d\n", files[i].reactions[j].threshold.reset.period);
-			dprintf("       * threshold reset cmd: %d\n", files[i].reactions[j].threshold.reset.cmd);
+			dprintf("    * re %d: %s\n", j, files[i].re[j].str);
+			dprintf("       * cmd: %s\n", files[i].re[j].cmd);
+			dprintf("       * mail: %s\n", files[i].re[j].mail);
+			dprintf("       * threshold key: %s\n", files[i].re[j].threshold.config.key);
+			dprintf("       * threshold trigger count: %d\n", files[i].re[j].threshold.config.trigger_count);
+			dprintf("       * threshold trigger period: %d\n", files[i].re[j].threshold.config.trigger_period);
+			dprintf("       * threshold reset count: %d\n", files[i].re[j].threshold.config.reset_count);
+			dprintf("       * threshold reset period: %d\n", files[i].re[j].threshold.config.reset_period);
+			dprintf("       * threshold reset cmd: %d\n", files[i].re[j].threshold.config.reset_cmd);
 		}
 	}
 

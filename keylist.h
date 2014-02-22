@@ -1,8 +1,11 @@
+/*
+ * $Id$
+ */
 #ifndef KEYLIST_H
 #define KEYLIST_H
 
 /*
- * keylist: single linked list using a string as key
+ * keylist library: single linked list using a string as key
  * list is sorted alphabetically by the key
  */
 

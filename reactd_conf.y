@@ -27,9 +27,9 @@ int yydebug=1;
 %token COMMANDKEY
 %token THRESHOLDKEY
 %token KEYKEY
-%token COUNTKEY
-%token PERIODKEY
+%token TRIGGERKEY
 %token RESETKEY
+%token INKEY
 
 %union {
 	int ival;
@@ -101,7 +101,7 @@ re_entries:
 re_entry:
 	STRING	{
 			dprintf("starting re section: '%s' renum: %d\n", $1, files[filenum].renum);
-			files[filenum].reactions[files[filenum].renum].str = $1;
+			files[filenum].re[files[filenum].renum].str = $1;
 		}
 	'{'
 	re_options
@@ -119,11 +119,11 @@ re_options:
 re_option:
 	COMMANDKEY '=' STRING	{
 					dprintf("re command: '%s'\n", $3);
-					files[filenum].reactions[files[filenum].renum].cmd = $3;
+					files[filenum].re[files[filenum].renum].cmd = $3;
 				}
 	| MAILKEY '=' STRING	{
 					dprintf("re mail: '%s'\n", $3);
-					files[filenum].reactions[files[filenum].renum].mail = $3;
+					files[filenum].re[files[filenum].renum].mail = $3;
 				}
 	| threshold
 	|
@@ -148,15 +148,13 @@ threshold_options:
 threshold_option:
 	KEYKEY '=' STRING	{
 					dprintf("threshold key: '%s'\n", $3);
-					files[filenum].reactions[files[filenum].renum].threshold.key = $3;
+					files[filenum].re[files[filenum].renum].threshold.config.key = $3;
 				}
-	| COUNTKEY '=' INT	{
+	| TRIGGERKEY '=' INT INKEY PERIOD	{
 					dprintf("threshold count: %d\n", $3);
-					files[filenum].reactions[files[filenum].renum].threshold.count = $3;
-				}
-	| PERIODKEY '=' PERIOD	{
-					dprintf("threshold period: %d\n", $3);
-					files[filenum].reactions[files[filenum].renum].threshold.period = $3;
+					dprintf("threshold period: %d\n", $5);
+					files[filenum].re[files[filenum].renum].threshold.config.trigger_count = $3;
+					files[filenum].re[files[filenum].renum].threshold.config.trigger_period = $5;
 				}
 	| RESETKEY
 	'{'	{
@@ -174,13 +172,15 @@ reset_options:
 	;
 	
 reset_option:
-	PERIODKEY '=' PERIOD	{
-					dprintf("reset time %d\n", $3);
-					files[filenum].reactions[files[filenum].renum].threshold.reset.period = $3;
+	TRIGGERKEY '=' INT INKEY PERIOD	{
+					dprintf("reset count %d\n", $3);
+					dprintf("reset period %d\n", $5);
+					files[filenum].re[files[filenum].renum].threshold.config.reset_count = $3;
+					files[filenum].re[files[filenum].renum].threshold.config.reset_period = $5;
 				}
 	| COMMANDKEY '=' STRING	{
 					dprintf("reset command: '%s'\n", $3);
-					files[filenum].reactions[files[filenum].renum].threshold.reset.cmd = $3;
+					files[filenum].re[files[filenum].renum].threshold.config.reset_cmd = $3;
 				}
 	;
 	

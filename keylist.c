@@ -1,3 +1,6 @@
+/*
+ * $Id$
+ */
 #include "keylist.h"
 #include <stdio.h>
 #include <string.h>

@@ -21,9 +21,9 @@ log		{ return LOGKEY; }
 command		{ return COMMANDKEY; }
 threshold	{ return THRESHOLDKEY; }
 key		{ return KEYKEY; }
-count		{ return COUNTKEY; }
-period		{ return PERIODKEY; }
+trigger		{ return TRIGGERKEY; }
 reset		{ return RESETKEY; }
+in		{ return INKEY; }
 [0-9]+[ \t]+(second|minute|hour|day)s?	{
 	int num;
 	char unit[7];
