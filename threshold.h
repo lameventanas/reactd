@@ -4,6 +4,9 @@
 #ifndef THRESHOLD_H
 #define THRESHOLD_H
 
+#include <time.h>
+#include "keylist.h"
+
 /*
  * threshold library: Keeps the configuration for an event threshold, and tracks occurrances and triggered status
  */
@@ -21,7 +24,7 @@ typedef struct {
 		int reset_period;
 		char *reset_cmd;
 	} config;
-	keylist *occurrances; // hash of key => occurrance_rec
+	keylist *occurrances; // hash of key => occurrances_rec
 } tthreshold;
 
 
@@ -31,12 +34,13 @@ typedef struct {
  * Thereafeter, if the reset threshold is reached, the "triggered" status is reset
  */
 typedef struct {
-	int lastupdate; // records when was the last update (to prevent unnecessary updates)
-	int first; // first timestamp occurrance (index to first in array)
-	int last; // last timestamp occurrance (index to last in array)
-	time_t *timestamp; // this array holds the last X timestamps of occurrances in a ring structure (x = max(threshold_count, reset_count)
+	int lastupdate; // records when was the last update (to prevent unnecessary updates to triggered status UNUSED?)
+	int start; // pointer to first timestamp occurrance in the ring
+	int count; // number of elements stored
+	int size; // size of the ring, this is max(threshold_count, reset_count)
+	time_t *timestamp; // holds last X timestamps of occurrances in a circular buffer
 	int triggered; // 0 = normal, 1 = triggered
-} occurrance_rec;
+} occurrances_rec;
 
 /*
  * records an occurrance in a threshold with this key
