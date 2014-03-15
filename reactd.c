@@ -15,6 +15,7 @@
 #include <getopt.h>
 
 #include "reactd.h"
+#include "threshold.h"
 
 extern FILE *yyin;
 
@@ -125,15 +126,20 @@ void react(tfile *file) {
 			int matches;
 			for (i = 0; i < file->renum; i++) {
 				matches = pcre_exec(file->re[i].re, file->re[i].re_studied, buf, strlen(buf), 0, 0, re_ret, 3*MAX_RE_CAPTURES);
+				
+				// NOTE: 0 means return vector overflow, and negative numbers are errors
 				if (matches >= 0) {
+					char *key;
 					dprintf("! String '%s' matched re '%s'\n", buf, file->re[i].str);
 					
-					// if there is a defined threshold, take not of the occurrance
-					if (file->re[i].threshold.config.trigger_period != 0) {
-						
-					}
+					// replace the captured strings in the KEY from config, then record occurrance
 					
-					
+					/*
+					// record occurrance
+					threshold_record_occurrance(&file->re[i].threshold, key);
+					// check if event has been triggered
+					occurrances = keylist_get(&file->re[i].threshold->occurrances, key);
+					*/
 					
 					dprintf("! Running cmd: %s\n", files->re[i].cmd);
 				}
