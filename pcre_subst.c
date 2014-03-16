@@ -56,6 +56,7 @@ char *pcre_subst_replace(char *subject, char *replacement, int *backref, int *ov
 	int bp; // backreference position
 	int free_backref = 0; // a reminder to free backref, in case caller didn't allocate its memory
 	char *ret; // string to return
+	int len; // length of string to return
 	
 	if (backref == NULL) {
 		backref = pcre_subst_study(replacement);
@@ -64,7 +65,7 @@ char *pcre_subst_replace(char *subject, char *replacement, int *backref, int *ov
 	
 	// calculate length of resulting string
 	bp = 0;
-	int len = strlen(replacement);
+	len = strlen(replacement);
 	
 	while (backref[bp+1] != -1) {
 		// for each backreference substract number of digits and the backslash, and add the matching string length
@@ -77,11 +78,14 @@ char *pcre_subst_replace(char *subject, char *replacement, int *backref, int *ov
 	ret = malloc(len + 1);
 	ret[len] = 0; // final char
 	
-	// copy replacement string leading to next backreference
-	strncat(ret, replacement, backref[1]);
+	// copy replacement string up to first backreference
+	if (backref[1] == -1)
+		strcpy(ret, replacement); // no backreferences, copy everything
+	else
+		strncpy(ret, replacement, backref[1]);
 	
 	// substitute backreferences with matches
-	for (bp = 0; backref[bp] != -1; bp+=2) {
+	for (bp = 0; backref[bp+1] != -1; bp+=2) {
 		if (bp > 0) {
 			// copy portion from replacement string leading to this backreference
 			strncat(ret, &replacement[backref[bp-2+1] + digits(backref[bp-2])+1 ], backref[bp+1] - (backref[bp-2+1] + digits(backref[bp-2])+1));
