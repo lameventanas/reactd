@@ -3,127 +3,145 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pcre.h>
+#include "pcre_subst.h"
 
 /*
  * Studies a replacement string.
- * Should be used when reusing a replacement string multiple times
- * returns an array of backreferences:
- * - first int: backref number (eg: \2 -> 2)
- * - second int: position in replacement string
- * ends with -1 for position to indicate end of backreferences
+ * Result is a structure used by pcre_subst_replace()
+ * Once a replacement string has been studied, it can be modified or freed.
  */
-int *pcre_subst_study(char *replacement) {
-	int i;
-	int bp;
-	int *backref;
+struct pcre_subst_data *pcre_subst_study(char *replacement) {
+	int di; // iterate in data
+	int i; // iterate in replacement
+	int p; // beginning of previous replacement substring
+	struct pcre_subst_data *data;
 	
-	// worst case we have a full replacement string, eg: "\1\2\3\4\5"
-	// we need 2 * number of backref, so this matches strlen(replacement)
-	backref = malloc(strlen(replacement) * sizeof(int));
-	
-	backref[1] = -1;
-	bp = 0;
-	i = 0;
+	// first we figure out how many elements we need for data
+	di = 0; i = 0; p = 0;
 	while (replacement[i] != '\0') {
 		if (replacement[i] == '\\') {
-			if (isdigit(replacement[i + 1])) {
-				backref[bp+1] = i;
-				backref[bp] = 0;
-				while (isdigit(replacement[++i])) {
-					backref[bp] = backref[bp] * 10 + replacement[i] - 48;
+			if (p < i)
+				di++;
+			i++;
+			if (isdigit(replacement[i])) {
+				while (isdigit(replacement[i]))
+					i++;
+				di++;
+			} else {
+				if (replacement[i] == '\\' || replacement[i] == '\n' || replacement[i] == '\r' || replacement[i] == '\t' || replacement[i] == '\e' || replacement[i] == '\a' || replacement[i] == '\f') {
+					i++;
+					di++;
 				}
-				bp+=2;
-				backref[bp] = -1;
-				backref[bp+1] = -1;
-				i--; // compensate for going one char more than we should
 			}
+			p = i;
+		} else {
+			i++;
 		}
-		i++;
 	}
-	return backref;
+	// last replacement substring
+	if (p < i)
+		di++;
+
+	// allocate space for each element plus the PCRE_SUBST_END one
+	data = malloc((di+1) * sizeof(struct pcre_subst_data));
+
+	// now fill data
+	di = 0; i = 0; p = 0;
+	while (replacement[i] != '\0') {
+		if (replacement[i] == '\\') {
+			// copy previously found replacement substring
+			if (p < i) {
+				data[di].type = PCRE_SUBST_REPLACEMENT;
+				data[di].s = strndup(replacement + p, i - p);
+				di++;
+			}
+			i++;
+			if (isdigit(replacement[i])) {
+				data[di].type = PCRE_SUBST_SUBJECT;
+				while (isdigit(replacement[i])) {
+					data[di].num = data[di].num * 10 + replacement[i] - '0';
+					i++;
+				}
+				di++;
+			} else {
+				data[di].type = PCRE_SUBST_REPLACEMENT;
+				switch(replacement[i]) {
+					case '\\': data[di].s = strdup("\\"); i++; di++; break;
+					case 'n': data[di].s = strdup("\n"); i++; di++; break;
+					case 'r': data[di].s = strdup("\r"); i++; di++; break;
+					case 't': data[di].s = strdup("\t"); i++; di++; break;
+					case 'e': data[di].s = strdup("\e"); i++; di++; break;
+					case 'a': data[di].s = strdup("\a"); i++; di++; break;
+					case 'f': data[di].s = strdup("\f"); i++; di++; break;
+				}
+			}
+			p = i;
+		} else {
+			i++;
+		}
+	}
+	
+	// handle last replacement substring
+	if (p < i) {
+		data[di].type = PCRE_SUBST_REPLACEMENT;
+		data[di].s = strndup(replacement+p, i-p);
+		di++;
+	}
+	
+	// finalize array
+	data[di].type = PCRE_SUBST_END;
+	
+	return data;
+	
 }
 
 /*
  * Replaces a subject already matched with pcre_exec() into a replacement string
  * subject: the string matched with pcre_exec
- * replacement: the replacement string with the backreferences, possibly studied
- * backref: array of backreferences as returned by pcre_subst_study, or NULL
+ * data: structure as returned by pcre_subst_study
  * ovector: same as returned by pcre_exec()
  * ovecsize: same used with pcre_exec()
  * return: a new allocated string with the substitutions made, must be freed by caller
  */
-char *pcre_subst_replace(char *subject, char *replacement, int *backref, int *ovector, int ovecsize, int matches) {
-	int bp; // backreference position
-	int free_backref = 0; // a reminder to free backref, in case caller didn't allocate its memory
-	char *ret; // string to return
-	int len; // length of string to return
+char *pcre_subst_replace(char *subject, struct pcre_subst_data *data, int *ovector, int ovecsize, int matches) {
+	int di = 0;
+	int len;
+	char *s;
 	
-	if (backref == NULL) {
-		backref = pcre_subst_study(replacement);
-		free_backref = 1;
-	}
-	
-	// calculate length of resulting string
-	bp = 0;
-	len = strlen(replacement);
-	
-	while (backref[bp+1] != -1) {
-		// for each backreference substract number of digits and the backslash, and add the matching string length
-		len -= (digits(backref[bp]) + 1);
-		if (matches > backref[bp] && ovector[2*backref[bp]] != -1) // if there is a match for this backreference, add matched length
-			len += (ovector[2*backref[bp]+1] - ovector[2*backref[bp]]);
-		bp += 2;
-	}
-	
-	ret = malloc(len + 1);
-	ret[len] = 0; // final char
-	
-	// copy replacement string up to first backreference
-	if (backref[1] == -1)
-		strcpy(ret, replacement); // no backreferences, copy everything
-	else
-		strncpy(ret, replacement, backref[1]);
-	
-	// substitute backreferences with matches
-	for (bp = 0; backref[bp+1] != -1; bp+=2) {
-		if (bp > 0) {
-			// copy portion from replacement string leading to this backreference
-			strncat(ret, &replacement[backref[bp-2+1] + digits(backref[bp-2])+1 ], backref[bp+1] - (backref[bp-2+1] + digits(backref[bp-2])+1));
+	len = 0;
+	for (di = 0; data[di].type != PCRE_SUBST_END; di++) {
+		if (data[di].type == PCRE_SUBST_REPLACEMENT) {
+			len += strlen(data[di].s);
 		}
-		
-		// skip the copy from subject if this backreference can't be substituted (not returned by pcre_exec)
-		if (matches > backref[bp] && ovector[2*backref[bp]] != -1) {
-			// copy captured match from subject
-			strncat(ret, &subject[ovector[2*backref[bp]]], ovector[2*backref[bp]+1] - ovector[2*backref[bp]]); 
+		if (data[di].type == PCRE_SUBST_SUBJECT) {
+			if (matches > data[di].num && ovector[2 * data[di].num] != -1)
+				len += (ovector[2 * data[di].num + 1] - ovector[2 * data[di].num]);
+		}
+	}
+	s = malloc(len + 1);
+	s[len] = '\0';
+	
+	for (di = 0; data[di].type != PCRE_SUBST_END; di++) {
+		if (data[di].type == PCRE_SUBST_REPLACEMENT)
+			strcat(s, data[di].s);
+		if (data[di].type == PCRE_SUBST_SUBJECT) {
+			if (matches > data[di].num && ovector[2 * data[di].num] != -1)
+				strncat(s, &subject[ovector[2 * data[di].num]], ovector[2 * data[di].num + 1 ] - ovector[2 * data[di].num]);
 		}
 	}
 	
-	// if there were any backreferences, copy final portion from replacement string too
-	if (backref[1] != -1)
-		strcat(ret, &replacement[backref[bp-2+1] + digits(backref[bp-2]) +1 ]);
-	
-	// if we allocated backreferences, free it
-	if (free_backref)
-		free(backref);
-	
-	return ret;
+	return s;
 }
 
-
 /*
- * Return number of digits of a number
- * a more elegant alternative is to use log10(x)+1, but it requires linking with -lm
+ * Free replacement data returned by pcre_subst_study()
  */
-int digits(int x) {
-	int ret = 0;
-	
-	// not really needed in this case, but:
-	if (x < 0) x *= -1;
-	if (x == 0)
-		return 1;
-	while (x > 0) {
-		x/= 10;
-		ret++;
-	}
-	return ret;
+void pcre_subst_free(struct pcre_subst_data *data) {
+	int di = 0;
+
+	for (di = 0; data[di].type != PCRE_SUBST_END; di++)
+		if (data[di].type == PCRE_SUBST_REPLACEMENT)
+			free(data[di].s);
+
+	free(data);
 }

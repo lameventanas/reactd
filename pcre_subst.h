@@ -3,25 +3,40 @@
 #ifndef PCRE_SUBST_H
 #define PCRE_SUBST_H
 
+// pcre_subst_study returns a null-terminated array of pcre_subst_data
+#define PCRE_SUBST_END 0
+#define PCRE_SUBST_REPLACEMENT 1
+#define PCRE_SUBST_SUBJECT 2
+struct pcre_subst_data {
+	int type;
+	union {
+		char *s; // string from replacement, when type = PCRE_SUBST_REPLACEMENT
+		int num; // number of backreference, when type = PCRE_SUBST_SUBJECT
+	};
+};
+
+
 /*
  * Studies a replacement string.
- * Should be used when reusing a replacement string multiple times
- * returns an array of backreferences:
- * - first int: backref number (eg: \2 -> 2)
- * - second int: position in replacement string
- * ends with -1 for position to indicate end of backreferences
+ * Result is a structure used by pcre_subst_replace()
+ * Once a replacement string has been studied, it can be modified or freed.
  */
-int *pcre_subst_study(char *replacement);
+struct pcre_subst_data *pcre_subst_study(char *replacement);
 
 /*
  * Replaces a subject already matched with pcre_exec() into a replacement string
  * subject: the string matched with pcre_exec
- * replacement: the replacement string with the backreferences, possibly studied
- * backref: array of backreferences as returned by pcre_subst_study, or NULL
+ * data: structure as returned by pcre_subst_study
  * ovector: same as returned by pcre_exec()
  * ovecsize: same used with pcre_exec()
  * return: a new allocated string with the substitutions made, must be freed by caller
  */
-char *pcre_subst_replace(char *subject, char *replacement, int *backref, int *ovector, int ovecsize, int matches);
+
+char *pcre_subst_replace(char *subject, struct pcre_subst_data *data, int *ovector, int ovecsize, int matches);
+
+/*
+ * Free replacement data returned by pcre_subst_study()
+ */
+void pcre_subst_free(struct pcre_subst_data *data);
 
 #endif

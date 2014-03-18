@@ -19,12 +19,16 @@ int main(int argc, char *argv[]) {
 	int re_ret[3 * MAX_RE_CAPTURES];
 	
 	re = pcre_compile(argv[2], 0, &error_msg, &error_off, pcre_tables);
+	
+	struct pcre_subst_data *subst_data = pcre_subst_study(argv[3]);
+	
 	matches = pcre_exec(re, NULL, argv[1], strlen(argv[1]), 0, 0, re_ret, 3*MAX_RE_CAPTURES);
 	printf("pcre_exec returned: %d\n", matches);
 	
 	if (matches > 0) {
-		char *s = pcre_subst_replace(argv[1], argv[3], NULL, re_ret, 3*MAX_RE_CAPTURES, matches);
+		char *s = pcre_subst_replace(argv[1], subst_data, re_ret, 3*MAX_RE_CAPTURES, matches);
 		printf("->%s<-\n", s);
+		pcre_subst_free(subst_data);
 		free(s);
 	} else {
 		printf("no match\n");
