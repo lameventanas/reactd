@@ -6,6 +6,7 @@
 
 #include <time.h>
 #include "keylist.h"
+#include "pcre_subst.h"
 
 /*
  * threshold library: Keeps the configuration for an event threshold, and tracks occurrances and triggered status
@@ -18,6 +19,7 @@
 typedef struct {
 	struct {
 		char *key;
+		pcre_subst_data *re_subst_key; // constructed from key
 		int trigger_count;
 		int trigger_period;
 		int reset_count;

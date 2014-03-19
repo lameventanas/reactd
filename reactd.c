@@ -130,8 +130,15 @@ void react(tfile *file) {
 				// NOTE: 0 means return vector overflow, and negative numbers are errors
 				if (matches >= 0) {
 					char *key;
-					dprintf("! String '%s' matched re '%s'\n", buf, file->re[i].str);
+					dprintf("! String '%s' matched re '%s' matches: %d\n", buf, file->re[i].str, matches);
 					
+					key = pcre_subst_replace(buf, file->re[i].threshold.config.re_subst_key, re_ret, 3*MAX_RE_CAPTURES, matches);
+					dprintf("Key was substituted: '%s'\n", key);
+					
+					threshold_record_occurrance(&file->re[i].threshold, key);
+					dprintf("Recorded occurrance of %s\n", key);
+					
+					free(key);
 					// replace the captured strings in the KEY from config, then record occurrance
 					
 					/*
@@ -140,7 +147,7 @@ void react(tfile *file) {
 					// check if event has been triggered
 					occurrances = keylist_get(&file->re[i].threshold->occurrances, key);
 					*/
-					
+
 					dprintf("! Running cmd: %s\n", files->re[i].cmd);
 				}
 			}
@@ -203,6 +210,11 @@ int main(int argc, char **argv) {
 			
 			files[i].re[j].re_studied = pcre_study(files[i].re[j].re, 0, &error_msg);
 			
+			// if a threshold has been configured, study the key replacement string to make substitutions on every match
+			if (files[i].re[j].threshold.config.trigger_count > 0) {
+				files[i].re[j].threshold.config.re_subst_key = pcre_subst_study(files[i].re[j].threshold.config.key);
+			}
+				
 			dprintf("    * re %d: %s\n", j, files[i].re[j].str);
 			dprintf("       * cmd: %s\n", files[i].re[j].cmd);
 			dprintf("       * mail: %s\n", files[i].re[j].mail);
@@ -212,6 +224,10 @@ int main(int argc, char **argv) {
 			dprintf("       * threshold reset count: %d\n", files[i].re[j].threshold.config.reset_count);
 			dprintf("       * threshold reset period: %d\n", files[i].re[j].threshold.config.reset_period);
 			dprintf("       * threshold reset cmd: %d\n", files[i].re[j].threshold.config.reset_cmd);
+			if (files[i].re[j].threshold.config.trigger_count > 0) {
+				dprintf("       * threshold subst key data: 0x%X\n", files[i].re[j].threshold.config.re_subst_key);
+				pcre_subst_print(files[i].re[j].threshold.config.re_subst_key);
+			}
 		}
 	}
 

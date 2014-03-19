@@ -10,12 +10,13 @@
  * Result is a structure used by pcre_subst_replace()
  * Once a replacement string has been studied, it can be modified or freed.
  */
-struct pcre_subst_data *pcre_subst_study(char *replacement) {
+pcre_subst_data *pcre_subst_study(char *replacement) {
 	int di; // iterate in data
 	int i; // iterate in replacement
 	int p; // beginning of previous replacement substring
-	struct pcre_subst_data *data;
+	pcre_subst_data *data;
 	
+	// printf("pcre_subst_study: studying %s\n", replacement);
 	// first we figure out how many elements we need for data
 	di = 0; i = 0; p = 0;
 	while (replacement[i] != '\0') {
@@ -43,7 +44,7 @@ struct pcre_subst_data *pcre_subst_study(char *replacement) {
 		di++;
 
 	// allocate space for each element plus the PCRE_SUBST_END one
-	data = malloc((di+1) * sizeof(struct pcre_subst_data));
+	data = malloc((di+1) * sizeof(pcre_subst_data));
 
 	// now fill data
 	di = 0; i = 0; p = 0;
@@ -91,6 +92,8 @@ struct pcre_subst_data *pcre_subst_study(char *replacement) {
 	// finalize array
 	data[di].type = PCRE_SUBST_END;
 	
+	// pcre_subst_print(data);
+	
 	return data;
 	
 }
@@ -103,10 +106,12 @@ struct pcre_subst_data *pcre_subst_study(char *replacement) {
  * ovecsize: same used with pcre_exec()
  * return: a new allocated string with the substitutions made, must be freed by caller
  */
-char *pcre_subst_replace(char *subject, struct pcre_subst_data *data, int *ovector, int ovecsize, int matches) {
+char *pcre_subst_replace(char *subject, pcre_subst_data *data, int *ovector, int ovecsize, int matches) {
 	int di = 0;
 	int len;
 	char *s;
+	
+	printf("pcre_subst_replace: replacing '%s' data: 0x%X\n", subject, data);
 	
 	len = 0;
 	for (di = 0; data[di].type != PCRE_SUBST_END; di++) {
@@ -119,6 +124,7 @@ char *pcre_subst_replace(char *subject, struct pcre_subst_data *data, int *ovect
 		}
 	}
 	s = malloc(len + 1);
+	s[0] = '\0';
 	s[len] = '\0';
 	
 	for (di = 0; data[di].type != PCRE_SUBST_END; di++) {
@@ -136,7 +142,7 @@ char *pcre_subst_replace(char *subject, struct pcre_subst_data *data, int *ovect
 /*
  * Free replacement data returned by pcre_subst_study()
  */
-void pcre_subst_free(struct pcre_subst_data *data) {
+void pcre_subst_free(pcre_subst_data *data) {
 	int di = 0;
 
 	for (di = 0; data[di].type != PCRE_SUBST_END; di++)
@@ -144,4 +150,20 @@ void pcre_subst_free(struct pcre_subst_data *data) {
 			free(data[di].s);
 
 	free(data);
+}
+
+void pcre_subst_print(pcre_subst_data *data) {
+	int di;
+	
+	printf("pcre_subst_print 0x%X\n", data);
+	for (di = 0; data[di].type != PCRE_SUBST_END; di++) {
+		printf("%d: ", di);
+		if (data[di].type == PCRE_SUBST_REPLACEMENT) {
+			printf("string: '%s' ", data[di].s);
+		}
+		if (data[di].type == PCRE_SUBST_SUBJECT) {
+			printf("reference: %d ", data[di].num);
+		}
+		printf("\n");
+	}
 }

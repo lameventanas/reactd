@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
 	
 	re = pcre_compile(argv[2], 0, &error_msg, &error_off, pcre_tables);
 	
-	struct pcre_subst_data *subst_data = pcre_subst_study(argv[3]);
+	pcre_subst_data *subst_data = pcre_subst_study(argv[3]);
 	
 	matches = pcre_exec(re, NULL, argv[1], strlen(argv[1]), 0, 0, re_ret, 3*MAX_RE_CAPTURES);
 	printf("pcre_exec returned: %d\n", matches);
