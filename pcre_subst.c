@@ -10,7 +10,7 @@
  * Result is a structure used by pcre_subst_replace()
  * Once a replacement string has been studied, it can be modified or freed.
  */
-pcre_subst_data *pcre_subst_study(char *replacement) {
+pcre_subst_data *pcre_subst_study(char *replacement, int options) {
 	int di; // iterate in data
 	int i; // iterate in replacement
 	int p; // beginning of previous replacement substring
@@ -20,7 +20,7 @@ pcre_subst_data *pcre_subst_study(char *replacement) {
 	// first we figure out how many elements we need for data
 	di = 0; i = 0; p = 0;
 	while (replacement[i] != '\0') {
-		if (replacement[i] == '\\') {
+		if (replacement[i] == '\\' && (isdigit(replacement[i+1]) || !(options | PCRE_SUBST_NO_SPECIAL_CHARS))) {
 			if (p < i)
 				di++;
 			i++;
@@ -49,7 +49,7 @@ pcre_subst_data *pcre_subst_study(char *replacement) {
 	// now fill data
 	di = 0; i = 0; p = 0;
 	while (replacement[i] != '\0') {
-		if (replacement[i] == '\\') {
+		if (replacement[i] == '\\' && (isdigit(replacement[i+1]) || !(options | PCRE_SUBST_NO_SPECIAL_CHARS))) {
 			// copy previously found replacement substring
 			if (p < i) {
 				data[di].type = PCRE_SUBST_REPLACEMENT;
@@ -106,33 +106,52 @@ pcre_subst_data *pcre_subst_study(char *replacement) {
  * ovecsize: same used with pcre_exec()
  * return: a new allocated string with the substitutions made, must be freed by caller
  */
-char *pcre_subst_replace(char *subject, pcre_subst_data *data, int *ovector, int ovecsize, int matches) {
+char *pcre_subst_replace(char *subject, pcre_subst_data *data, int *ovector, int ovecsize, int matches, int options) {
 	int di = 0;
 	int len;
 	char *s;
+	int i;
 	
-	printf("pcre_subst_replace: replacing '%s' data: 0x%X\n", subject, data);
+	// printf("pcre_subst_replace: replacing '%s' data: 0x%X\n", subject, data);
 	
 	len = 0;
 	for (di = 0; data[di].type != PCRE_SUBST_END; di++) {
 		if (data[di].type == PCRE_SUBST_REPLACEMENT) {
 			len += strlen(data[di].s);
-		}
-		if (data[di].type == PCRE_SUBST_SUBJECT) {
-			if (matches > data[di].num && ovector[2 * data[di].num] != -1)
-				len += (ovector[2 * data[di].num + 1] - ovector[2 * data[di].num]);
+		} else if (data[di].type == PCRE_SUBST_SUBJECT) {
+			if (matches > data[di].num && ovector[2 * data[di].num] != -1) {
+				if (options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ)
+					len+=2; // add spaces for quotes around subject substring
+				for (i = ovector[2 * data[di].num]; i < ovector[2 * data[di].num + 1]; i++) {
+					len++;
+					// add an extra space to escape the quote in the subject substring
+					if ((options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ) && subject[i] == '\'')
+						len++;
+				}
+			}
 		}
 	}
+	
 	s = malloc(len + 1);
 	s[0] = '\0';
 	s[len] = '\0';
 	
 	for (di = 0; data[di].type != PCRE_SUBST_END; di++) {
-		if (data[di].type == PCRE_SUBST_REPLACEMENT)
+		if (data[di].type == PCRE_SUBST_REPLACEMENT) {
 			strcat(s, data[di].s);
-		if (data[di].type == PCRE_SUBST_SUBJECT) {
-			if (matches > data[di].num && ovector[2 * data[di].num] != -1)
-				strncat(s, &subject[ovector[2 * data[di].num]], ovector[2 * data[di].num + 1 ] - ovector[2 * data[di].num]);
+		} else if (data[di].type == PCRE_SUBST_SUBJECT) {
+			if (matches > data[di].num && ovector[2 * data[di].num] != -1) {
+				if (options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ)
+					strcat(s, "'"); // start quote of subject substring
+				for (i = ovector[2 * data[di].num]; i < ovector[2 * data[di].num + 1 ]; i++) {
+					if (subject[i] == '\'' && (options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ))
+						strcat(s, "\\");
+					strncat(s, &subject[i], 1);
+				}
+				if (options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ)
+					strcat(s, "'"); // end quote of subject substring
+				// strncat(s, &subject[ovector[2 * data[di].num]], ovector[2 * data[di].num + 1 ] - ovector[2 * data[di].num]);
+			}
 		}
 	}
 	
@@ -152,6 +171,7 @@ void pcre_subst_free(pcre_subst_data *data) {
 	free(data);
 }
 
+/*
 void pcre_subst_print(pcre_subst_data *data) {
 	int di;
 	
@@ -167,3 +187,4 @@ void pcre_subst_print(pcre_subst_data *data) {
 		printf("\n");
 	}
 }
+*/

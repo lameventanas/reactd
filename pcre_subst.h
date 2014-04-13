@@ -14,12 +14,21 @@ typedef struct {
 } pcre_subst_data;
 
 
+// default: substitutes \\ \n \r \t \e \a \f in replacement substrings and does not quote subject substrings
+#define PCRE_SUBST_DEFAULT 0
+
+// do not substitute \\ \n \r \t \e \a \f in replacement substrings (applies to study function only)
+#define PCRE_SUBST_NO_SPECIAL_CHARS 1
+
+// single-quote subject substrings, and escape any found single-quotes in them (applies to replace function only)
+#define PCRE_SUBST_SQUOTE_ESCAPE_SUBJ 2
+
 /*
  * Studies a replacement string.
  * Result is a structure used by pcre_subst_replace()
  * Once a replacement string has been studied, it can be modified or freed.
  */
-pcre_subst_data *pcre_subst_study(char *replacement);
+pcre_subst_data *pcre_subst_study(char *replacement, int options);
 
 /*
  * Replaces a subject already matched with pcre_exec() into a replacement string
@@ -29,8 +38,7 @@ pcre_subst_data *pcre_subst_study(char *replacement);
  * ovecsize: same used with pcre_exec()
  * return: a new allocated string with the substitutions made, must be freed by caller
  */
-
-char *pcre_subst_replace(char *subject, pcre_subst_data *data, int *ovector, int ovecsize, int matches);
+char *pcre_subst_replace(char *subject, pcre_subst_data *data, int *ovector, int ovecsize, int matches, int options);
 
 /*
  * Free replacement data returned by pcre_subst_study()
