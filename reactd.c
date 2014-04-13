@@ -129,16 +129,19 @@ void react(tfile *file) {
 				
 				// NOTE: 0 means return vector overflow, and negative numbers are errors
 				if (matches >= 0) {
-					char *key;
-					dprintf("! String '%s' matched re '%s' matches: %d\n", buf, file->re[i].str, matches);
+					int run = 1;
+					// dprintf("! String '%s' matched re '%s' matches: %d\n", buf, file->re[i].str, matches);
 					
-					key = pcre_subst_replace(buf, file->re[i].threshold.config.re_subst_key, re_ret, 3*MAX_RE_CAPTURES, matches);
-					dprintf("Key was substituted: '%s'\n", key);
+					if (file->re[i].threshold.config.trigger_count > 0 ) {
+						char *key;
+						// if there is a threshold for this RE, record occurrance and maybe run command
+						key = pcre_subst_replace(buf, file->re[i].threshold.config.re_subst_key, re_ret, 3*MAX_RE_CAPTURES, matches);
 					
-					threshold_record_occurrance(&file->re[i].threshold, key);
-					dprintf("Recorded occurrance of %s\n", key);
+						run = threshold_record_occurrance(&file->re[i].threshold, key);
+						dprintf("Recorded occurrance of %s\n", key);
 					
-					free(key);
+						free(key);
+					}
 					// replace the captured strings in the KEY from config, then record occurrance
 					
 					/*
@@ -147,14 +150,39 @@ void react(tfile *file) {
 					// check if event has been triggered
 					occurrances = keylist_get(&file->re[i].threshold->occurrances, key);
 					*/
-
-					dprintf("! Running cmd: %s\n", files->re[i].cmd);
+					if (run) {
+						printf("*** Running cmd: %s\n", files->re[i].cmd);
+					}
 				}
 			}
 			
 		}
 	} while (r > 0);
 	close(fd);
+}
+
+void update_all_thresholds() {
+	int i;
+	int j;
+	keylist *thkey;
+	
+	// dprintf("update_all_thresholds\n");
+	for (i = 0; i < filenum; i++) {
+		for (j = 0; j < files[i].renum; j++) {
+			// if there is a reset for this threshold
+			if (files[i].re[j].threshold.config.trigger_count > 0 && files[i].re[j].threshold.config.reset_count > 0) {
+				// dprintf("Checking reset of threshold for file %d re %d\n", i, j);
+				for (thkey = files[i].re[j].threshold.occurrances; thkey != NULL; thkey = thkey->next) {
+					// dprintf("Checking key %s\n", thkey->key);
+					int run = threshold_update_status(&files[i].re[j].threshold, thkey->key);
+					dprintf("Running reset command for key %s: %d\n", thkey->key, run);
+					if (run) {
+						printf("Running reset command for key %s: %s\n", thkey->key, files[i].re[j].threshold.config.reset_cmd);
+					}
+				}
+			}
+		}
+	}
 }
 
 int main(int argc, char **argv) {
@@ -226,7 +254,7 @@ int main(int argc, char **argv) {
 			dprintf("       * threshold reset cmd: %d\n", files[i].re[j].threshold.config.reset_cmd);
 			if (files[i].re[j].threshold.config.trigger_count > 0) {
 				dprintf("       * threshold subst key data: 0x%X\n", files[i].re[j].threshold.config.re_subst_key);
-				pcre_subst_print(files[i].re[j].threshold.config.re_subst_key);
+				// pcre_subst_print(files[i].re[j].threshold.config.re_subst_key);
 			}
 		}
 	}
@@ -265,6 +293,8 @@ int main(int argc, char **argv) {
 	int pollret;
 	int polltimeout;
 
+	// TODO: should monitor for non-existant (unmonitored) files by watching their directory via inotify
+	// that way the poll timeout will only be used to reset thresholds, and also I won't miss the first writes of an unmonitored file (until the first timeout passes), but this is hard, and also, the directory itself could be deleted and created again, then nothing will be monitored anymore inside it
 	while (1) {
 		polltimeout = unwatchedfiles > 0 ? 5000 : -1;
 		dprintf("%d files configured (%d unmonitored) timeout: %d\n", filenum, unwatchedfiles, polltimeout);
@@ -293,6 +323,10 @@ int main(int argc, char **argv) {
 					}
 				}
 			}
+			
+			// TODO: here we should only update the thresholds every minute, not every timeout
+			update_all_thresholds();
+			
 			continue; // back to polling
 		}
 		

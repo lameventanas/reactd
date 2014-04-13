@@ -12,12 +12,15 @@ pthread_mutex_t mutex;
 
 void *update(void *arg) {
 	time_t t;
+	keylist *thkey;
+	
 	while (1) {
 		usleep(1000000); // 1 second
 		pthread_mutex_lock(&mutex);
 		t = time(NULL);
 		printf("update: Updating threshold t=%d\n", t);
-		threshold_update_status((tthreshold *)arg);
+		for (thkey = ((tthreshold *)arg)->occurrances; thkey; thkey = thkey->next)
+			threshold_update_status((tthreshold *)arg, thkey->key);
 		pthread_mutex_unlock(&mutex);
 	}
 }

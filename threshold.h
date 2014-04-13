@@ -33,7 +33,7 @@ typedef struct {
 /*
  * occurrance record: keeps track of the last <trigger count> occurrances (or the last <reset count> occurrances, if higher)
  * If the trigger threshold is reached, the "triggered" status is updated
- * Thereafeter, if the reset threshold is reached, the "triggered" status is reset
+ * Thereafter, if the reset threshold is reached, the "triggered" status is reset
  */
 typedef struct {
 	int lastupdate; // records when was the last update (to prevent unnecessary updates to triggered status UNUSED?)
@@ -47,11 +47,13 @@ typedef struct {
 /*
  * records an occurrance in a threshold with this key
  * this also updates the triggered status for this key
+ * returns true if this occurrance triggers the event
  */
-void threshold_record_occurrance(tthreshold *threshold, char *key);
+int threshold_record_occurrance(tthreshold *threshold, char *key);
 
 /* update the triggered status for all keys (should be called periodically to reset the actions, every 1 minute because that is the granularity for trigger periods)
+ * returns true if the trigger is reset
  */
-void threshold_update_status(tthreshold *threshold);
+int threshold_update_status(tthreshold *threshold, char *key);
 
 #endif
