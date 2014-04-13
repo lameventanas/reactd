@@ -34,5 +34,5 @@ subst_test: $(objects_subst_test)
 	$(CC) $(CFLAGS) $(objects_subst_test) -lpcre -o subst_test
 
 clean:
-	rm -f reactd $(objects_reactd) keylist_test $(objects_keylist_test) threshold_test $(objects_threshold_test) subst_test $(objects_subst_test)
+	rm -f reactd reactd_conf.tab.c reactd_conf.tab.h reactd_conf.lex.yy.c $(objects_reactd) keylist_test $(objects_keylist_test) threshold_test $(objects_threshold_test) subst_test $(objects_subst_test)
 
