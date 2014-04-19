@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
 			
 			printf("key: %s\n", thkey->key);
 			occurrances = thkey->value;
-			printf("\tlastupdate: %d\n", occurrances->lastupdate);
+			// printf("\tlastupdate: %d\n", occurrances->lastupdate);
 			printf("\tstart: %d\n", occurrances->start);
 			printf("\tcount: %d\n", occurrances->count);
 			printf("\ttriggered: %d\n", occurrances->triggered);

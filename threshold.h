@@ -36,7 +36,7 @@ typedef struct {
  * Thereafter, if the reset threshold is reached, the "triggered" status is reset
  */
 typedef struct {
-	int lastupdate; // records when was the last update (to prevent unnecessary updates to triggered status UNUSED?)
+	// int lastupdate; // records when was the last update (to prevent unnecessary updates to triggered status UNUSED?)
 	int start; // pointer to first timestamp occurrance in the ring
 	int count; // number of elements stored
 	int size; // size of the ring, this is max(threshold_count, reset_count)

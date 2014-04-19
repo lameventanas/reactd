@@ -120,13 +120,13 @@ char *pcre_subst_replace(char *subject, pcre_subst_data *data, int *ovector, int
 			len += strlen(data[di].s);
 		} else if (data[di].type == PCRE_SUBST_SUBJECT) {
 			if (matches > data[di].num && ovector[2 * data[di].num] != -1) {
-				if (options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ)
+				if (options & PCRE_SUBST_SHELL_ESCAPE_SUBJ)
 					len+=2; // add spaces for quotes around subject substring
 				for (i = ovector[2 * data[di].num]; i < ovector[2 * data[di].num + 1]; i++) {
 					len++;
-					// add an extra space to escape the quote in the subject substring
-					if ((options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ) && subject[i] == '\'')
-						len++;
+					// add extra space for '" and "' that go around single-quote
+					if ((options & PCRE_SUBST_SHELL_ESCAPE_SUBJ) && subject[i] == '\'')
+						len+=3;
 				}
 			}
 		}
@@ -141,14 +141,15 @@ char *pcre_subst_replace(char *subject, pcre_subst_data *data, int *ovector, int
 			strcat(s, data[di].s);
 		} else if (data[di].type == PCRE_SUBST_SUBJECT) {
 			if (matches > data[di].num && ovector[2 * data[di].num] != -1) {
-				if (options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ)
+				if (options & PCRE_SUBST_SHELL_ESCAPE_SUBJ)
 					strcat(s, "'"); // start quote of subject substring
 				for (i = ovector[2 * data[di].num]; i < ovector[2 * data[di].num + 1 ]; i++) {
-					if (subject[i] == '\'' && (options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ))
-						strcat(s, "\\");
-					strncat(s, &subject[i], 1);
+					if (subject[i] == '\'' && (options & PCRE_SUBST_SHELL_ESCAPE_SUBJ))
+						strcat(s, "'\"'\"'"); // end current single-quote string, add double quote string with ', start new single-quote string
+					else
+						strncat(s, &subject[i], 1);
 				}
-				if (options & PCRE_SUBST_SQUOTE_ESCAPE_SUBJ)
+				if (options & PCRE_SUBST_SHELL_ESCAPE_SUBJ)
 					strcat(s, "'"); // end quote of subject substring
 				// strncat(s, &subject[ovector[2 * data[di].num]], ovector[2 * data[di].num + 1 ] - ovector[2 * data[di].num]);
 			}

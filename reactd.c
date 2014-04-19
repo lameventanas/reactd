@@ -1,6 +1,7 @@
 /*
  * $Id$
  */
+#include "debug.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,7 +48,7 @@ int parseConfig(char *configfile) {
 */	
 	int i;
 	
-	dprintf("Initializing %d bytes in 0x%x\n", sizeof(files), files);
+	dprint("Initializing %d bytes in 0x%x", sizeof(files), files);
 	memset(files, 0, sizeof(files));
 	
 	yyin = fopen(configfile, "r");
@@ -69,12 +70,12 @@ void react(tfile *file) {
 	int r;
 	char *end;
 	
-	dprintf("Reacting on file %s\n", file->name);
+	dprint("Reacting on file %s", file->name);
 	// check if the file was truncated
 	if (-1 == stat(file->name, &st))
 		return;
 	if (st.st_size < file->pos) {
-		dprintf("File %s shrunk, reseting\n", file->name);
+		dprint("File %s shrunk, reseting", file->name);
 		file->pos = 0;
 	}
 	
@@ -85,13 +86,13 @@ void react(tfile *file) {
 	}
 	
 	do {
-		dprintf("Seeking %s to position %d\n", file->name, file->pos);
+		dprint("Seeking %s to position %d", file->name, file->pos);
 		if (-1 == lseek(fd, file->pos, SEEK_SET)) {
 			fprintf(stderr, "Error seeking %s to position %d: %s\n", file->name, file->pos, strerror(errno));
 			close(fd);
 		}
 		r = read(fd, buf, sizeof(buf));
-		dprintf("Read %d bytes\n", r);
+		dprint("Read %d bytes", r);
 		
 		if (r == -1) {
 			fprintf(stderr, "Error reading from %s: %s\n", file->name, strerror(errno));
@@ -102,12 +103,12 @@ void react(tfile *file) {
 			end = strchr(buf, 0xa);
 			if (end == NULL) {
 				if (r == sizeof(buf)) { // if filled the buffer but there is no newline, process the whole buffer as if it is a complete line
-					dprintf("Buffer is full but no newline found, taking whole buffer\n");
+					dprint("Buffer is full but no newline found, taking whole buffer");
 					end = &buf[sizeof(buf) - 1];
 					file->pos--; // re-read the last byte (because we will overwrite it in buf)
 				} /*
 				else { // read a partial line, ignore until another write adds a \n
-					dprintf("Partial string: '");
+					dprint("Partial string: '");
 					int z;
 					for (z=0; z<r; z++)
 						printf("%c", buf[z]);
@@ -118,27 +119,28 @@ void react(tfile *file) {
 			}
 			*end = 0; // null terminate string
 			file->pos += strlen(buf) + 1; // set next position to read from this file
-			dprintf(" ---> '%s' (%d bytes)\n", buf, strlen(buf));
+			dprint(" -->%s<-- (%d bytes)", buf, strlen(buf));
 
-			// match against all possible REs for this file
+			// match against all configured REs for this file
 			int i;
-			int re_ret[3 * MAX_RE_CAPTURES];
-			int matches;
 			for (i = 0; i < file->renum; i++) {
-				matches = pcre_exec(file->re[i].re, file->re[i].re_studied, buf, strlen(buf), 0, 0, re_ret, 3*MAX_RE_CAPTURES);
+				int buf_ret[3 * MAX_RE_CAPTURES];
+				int buf_matches;
+				buf_matches = pcre_exec(file->re[i].re, file->re[i].re_studied, buf, strlen(buf), 0, 0, buf_ret, 3*MAX_RE_CAPTURES);
 				
 				// NOTE: 0 means return vector overflow, and negative numbers are errors
-				if (matches >= 0) {
+				if (buf_matches >= 0) {
 					int run = 1;
-					// dprintf("! String '%s' matched re '%s' matches: %d\n", buf, file->re[i].str, matches);
+					// dprint("! String '%s' matched re '%s' matches: %d", buf, file->re[i].str, matches);
 					
+					// check first if there is a threshold configured for this RE
 					if (file->re[i].threshold.config.trigger_count > 0 ) {
 						char *key;
 						// if there is a threshold for this RE, record occurrance and maybe run command
-						key = pcre_subst_replace(buf, file->re[i].threshold.config.re_subst_key, re_ret, 3*MAX_RE_CAPTURES, matches);
+						key = pcre_subst_replace(buf, file->re[i].threshold.config.re_subst_key, buf_ret, 3*MAX_RE_CAPTURES, buf_matches, PCRE_SUBST_DEFAULT);
 					
 						run = threshold_record_occurrance(&file->re[i].threshold, key);
-						dprintf("Recorded occurrance of %s\n", key);
+						dprint("Recorded occurrance of %s, run: %d", key, run);
 					
 						free(key);
 					}
@@ -151,7 +153,11 @@ void react(tfile *file) {
 					occurrances = keylist_get(&file->re[i].threshold->occurrances, key);
 					*/
 					if (run) {
-						printf("*** Running cmd: %s\n", files->re[i].cmd);
+						char *cmd = pcre_subst_replace(buf, file->re[i].cmd_subst, buf_ret, 3*MAX_RE_CAPTURES, buf_matches, PCRE_SUBST_SHELL_ESCAPE_SUBJ);
+						
+						dprint("*** Running cmd: %s", cmd);
+						system(cmd);
+						free(cmd);
 					}
 				}
 			}
@@ -166,18 +172,20 @@ void update_all_thresholds() {
 	int j;
 	keylist *thkey;
 	
-	// dprintf("update_all_thresholds\n");
+	dprint("update_all_thresholds");
 	for (i = 0; i < filenum; i++) {
 		for (j = 0; j < files[i].renum; j++) {
 			// if there is a reset for this threshold
-			if (files[i].re[j].threshold.config.trigger_count > 0 && files[i].re[j].threshold.config.reset_count > 0) {
-				// dprintf("Checking reset of threshold for file %d re %d\n", i, j);
+			if (files[i].re[j].threshold.config.trigger_period > 0) {
+				dprint("Checking reset of threshold for file %d re %d", i, j);
 				for (thkey = files[i].re[j].threshold.occurrances; thkey != NULL; thkey = thkey->next) {
-					// dprintf("Checking key %s\n", thkey->key);
+					dprint("Checking key %s", thkey->key);
 					int run = threshold_update_status(&files[i].re[j].threshold, thkey->key);
-					dprintf("Running reset command for key %s: %d\n", thkey->key, run);
+					dprint("Running reset command for key %s: %d", thkey->key, run);
 					if (run) {
-						printf("Running reset command for key %s: %s\n", thkey->key, files[i].re[j].threshold.config.reset_cmd);
+						// the key will be in an environment variable (maybe I should do some replacement thing)
+						dprint(" *** Running reset command for key %s: %s", thkey->key, files[i].re[j].threshold.config.reset_cmd);
+						system(files[i].re[j].threshold.config.reset_cmd);
 					}
 				}
 			}
@@ -223,10 +231,11 @@ int main(int argc, char **argv) {
 	int error_off;
 #define PCRE_OPTIONS 0
 	
-	dprintf("Global options:\nversion: %f\npidfile: %s\nlogging: %s\n", version, pidfile, logging);
+	dprint_init();
+	dprint("Global options:\nversion: %f\npidfile: %s\nlogging: %s", version, pidfile, logging);
 	int i, j;
 	for (i = 0; i < filenum; i++) {
-		dprintf(" * File %d: %s\n", i, files[i].name);
+		dprint(" * File %d: %s", i, files[i].name);
 		
 		for (j = 0; j < files[i].renum; j++) {
 			files[i].re[j].re = pcre_compile(files[i].re[j].str, PCRE_OPTIONS, &error_msg, &error_off, pcre_tables);
@@ -237,23 +246,24 @@ int main(int argc, char **argv) {
 			}
 			
 			files[i].re[j].re_studied = pcre_study(files[i].re[j].re, 0, &error_msg);
+			files[i].re[j].cmd_subst = pcre_subst_study(files[i].re[j].cmd, PCRE_SUBST_DEFAULT);
 			
 			// if a threshold has been configured, study the key replacement string to make substitutions on every match
-			if (files[i].re[j].threshold.config.trigger_count > 0) {
-				files[i].re[j].threshold.config.re_subst_key = pcre_subst_study(files[i].re[j].threshold.config.key);
+			if (files[i].re[j].threshold.config.trigger_count > 0 && files[i].re[j].threshold.config.trigger_period > 0) {
+				files[i].re[j].threshold.config.re_subst_key = pcre_subst_study(files[i].re[j].threshold.config.key, PCRE_SUBST_DEFAULT);
 			}
 				
-			dprintf("    * re %d: %s\n", j, files[i].re[j].str);
-			dprintf("       * cmd: %s\n", files[i].re[j].cmd);
-			dprintf("       * mail: %s\n", files[i].re[j].mail);
-			dprintf("       * threshold key: %s\n", files[i].re[j].threshold.config.key);
-			dprintf("       * threshold trigger count: %d\n", files[i].re[j].threshold.config.trigger_count);
-			dprintf("       * threshold trigger period: %d\n", files[i].re[j].threshold.config.trigger_period);
-			dprintf("       * threshold reset count: %d\n", files[i].re[j].threshold.config.reset_count);
-			dprintf("       * threshold reset period: %d\n", files[i].re[j].threshold.config.reset_period);
-			dprintf("       * threshold reset cmd: %d\n", files[i].re[j].threshold.config.reset_cmd);
+			dprint("    * re %d: %s", j, files[i].re[j].str);
+			dprint("       * cmd: %s", files[i].re[j].cmd);
+			dprint("       * mail: %s", files[i].re[j].mail);
+			dprint("       * threshold key: %s", files[i].re[j].threshold.config.key);
+			dprint("       * threshold trigger count: %d", files[i].re[j].threshold.config.trigger_count);
+			dprint("       * threshold trigger period: %d", files[i].re[j].threshold.config.trigger_period);
+			dprint("       * threshold reset count: %d", files[i].re[j].threshold.config.reset_count);
+			dprint("       * threshold reset period: %d", files[i].re[j].threshold.config.reset_period);
+			dprint("       * threshold reset cmd: %d", files[i].re[j].threshold.config.reset_cmd);
 			if (files[i].re[j].threshold.config.trigger_count > 0) {
-				dprintf("       * threshold subst key data: 0x%X\n", files[i].re[j].threshold.config.re_subst_key);
+				dprint("       * threshold subst key data: 0x%X", files[i].re[j].threshold.config.re_subst_key);
 				// pcre_subst_print(files[i].re[j].threshold.config.re_subst_key);
 			}
 		}
@@ -297,7 +307,7 @@ int main(int argc, char **argv) {
 	// that way the poll timeout will only be used to reset thresholds, and also I won't miss the first writes of an unmonitored file (until the first timeout passes), but this is hard, and also, the directory itself could be deleted and created again, then nothing will be monitored anymore inside it
 	while (1) {
 		polltimeout = unwatchedfiles > 0 ? 5000 : -1;
-		dprintf("%d files configured (%d unmonitored) timeout: %d\n", filenum, unwatchedfiles, polltimeout);
+		dprint("%d files configured (%d unmonitored) timeout: %d", filenum, unwatchedfiles, polltimeout);
 		pollret = poll(&pollwatch, 1, polltimeout);
 		
 		if (pollret < 0) {
@@ -310,15 +320,15 @@ int main(int argc, char **argv) {
 		}
 		
 		if (pollret == 0) { // timeout: check unmonitored files
-			// dprintf("Checking unwatched files\n");
+			// dprint("Checking unwatched files");
 			int i;
 			for (i = 0; i < filenum && unwatchedfiles > 0; i++) {
 				if (files[i].watchfd == -1) {
-					// dprintf("Found unwatched file: %s\n", files[i].name);
+					// dprint("Found unwatched file: %s", files[i].name);
 					files[i].watchfd = inotify_add_watch(pollwatch.fd, files[i].name, INOTIFY_EVENTS);
 					if (files[i].watchfd != -1) {
 						files[i].pos = 0;
-						dprintf("Now monitoring %s\n", files[i].name);
+						dprint("Now monitoring %s", files[i].name);
 						unwatchedfiles--;
 					}
 				}
@@ -350,7 +360,7 @@ int main(int argc, char **argv) {
 			for (i = 0; i < filenum; i++) {
 				if (files[i].watchfd == ev->wd) {
 					file = &files[i];
-					dprintf("Affected file: %s\n", file->name);
+					dprint("Affected file: %s", file->name);
 					break;
 				}
 			}
@@ -360,7 +370,7 @@ int main(int argc, char **argv) {
 				
 			} else if (ev->mask & IN_IGNORED)  {
 				file->watchfd = -1;
-				dprintf("File %s is now unwatched\n", file->name);
+				dprint("File %s is now unwatched", file->name);
 				unwatchedfiles++;
 			}
 			

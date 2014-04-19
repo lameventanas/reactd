@@ -21,7 +21,7 @@ typedef struct {
 #define PCRE_SUBST_NO_SPECIAL_CHARS 1
 
 // single-quote subject substrings, and escape any found single-quotes in them (applies to replace function only)
-#define PCRE_SUBST_SQUOTE_ESCAPE_SUBJ 2
+#define PCRE_SUBST_SHELL_ESCAPE_SUBJ 2
 
 /*
  * Studies a replacement string.

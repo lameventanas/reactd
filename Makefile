@@ -1,16 +1,17 @@
 # $Id$
 
-CFLAGS = -pipe -DDEBUG -ggdb
+CFLAGS = -pipe -ggdb
 
 all: reactd keylist_test threshold_test subst_test
 
 debug: CFLAGS += -DDEBUG -ggdb
 debug: all
+	@true
 
-objects_reactd = reactd_conf.tab.o reactd_conf.lex.yy.o reactd.o keylist.o pcre_subst.o threshold.o
-objects_keylist_test = keylist_test.o keylist.o
-objects_threshold_test = threshold_test.o threshold.o keylist.o
-objects_subst_test = subst_test.o pcre_subst.o
+objects_reactd = reactd_conf.tab.o reactd_conf.lex.yy.o reactd.o keylist.o pcre_subst.o threshold.o debug.o
+objects_keylist_test = keylist_test.o keylist.o debug.o
+objects_threshold_test = threshold_test.o threshold.o keylist.o debug.o
+objects_subst_test = subst_test.o pcre_subst.o debug.o
 
 %.o: %.c %.h
 	$(CC) -c $(CFLAGS) $*.c -o $*.o

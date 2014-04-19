@@ -5,6 +5,7 @@
 
 %{
 #include <stdio.h>
+#include "debug.h"
 #include "reactd.h"
 #include "reactd_conf.tab.h"
 
@@ -82,14 +83,14 @@ file_entries:
 	
 file_entry:
 	STRING	{
-			dprintf("starting file section: '%s' filenum: %d\n", $1, filenum);
+			dprint("starting file section: '%s' filenum: %d\n", $1, filenum);
 			files[filenum].name = $1;
 		}
 	'{'
 	re_entries
 	'}'	{
 			filenum++;
-			dprintf("finished file section: '%s' filenum: %d\n", $1, filenum);
+			dprint("finished file section: '%s' filenum: %d\n", $1, filenum);
 		}
 	;
 	
@@ -100,13 +101,13 @@ re_entries:
 	
 re_entry:
 	STRING	{
-			dprintf("starting re section: '%s' renum: %d\n", $1, files[filenum].renum);
+			dprint("starting re section: '%s' renum: %d\n", $1, files[filenum].renum);
 			files[filenum].re[files[filenum].renum].str = $1;
 		}
 	'{'
 	re_options
 	'}'	{
-			dprintf("finished re section: '%s'\n", $1);
+			dprint("finished re section: '%s'\n", $1);
 			files[filenum].renum++;
 		}
 	;
@@ -118,11 +119,11 @@ re_options:
 	
 re_option:
 	COMMANDKEY '=' STRING	{
-					dprintf("re command: '%s'\n", $3);
+					dprint("re command: '%s'\n", $3);
 					files[filenum].re[files[filenum].renum].cmd = $3;
 				}
 	| MAILKEY '=' STRING	{
-					dprintf("re mail: '%s'\n", $3);
+					dprint("re mail: '%s'\n", $3);
 					files[filenum].re[files[filenum].renum].mail = $3;
 				}
 	| threshold
@@ -131,12 +132,12 @@ re_option:
 	
 threshold:
 	THRESHOLDKEY	{
-				dprintf("starting threshold section\n");
+				dprint("starting threshold section\n");
 			}
 	'{'
 	threshold_options
 	'}'		{
-				dprintf("finished threshold section\n");
+				dprint("finished threshold section\n");
 			}
 	;
 	
@@ -147,22 +148,22 @@ threshold_options:
 	
 threshold_option:
 	KEYKEY '=' STRING	{
-					dprintf("threshold key: '%s'\n", $3);
+					dprint("threshold key: '%s'\n", $3);
 					files[filenum].re[files[filenum].renum].threshold.config.key = $3;
 				}
 	| TRIGGERKEY '=' INT INKEY PERIOD	{
-					dprintf("threshold count: %d\n", $3);
-					dprintf("threshold period: %d\n", $5);
+					dprint("threshold count: %d\n", $3);
+					dprint("threshold period: %d\n", $5);
 					files[filenum].re[files[filenum].renum].threshold.config.trigger_count = $3;
 					files[filenum].re[files[filenum].renum].threshold.config.trigger_period = $5;
 				}
 	| RESETKEY
 	'{'	{
-			dprintf("starting reset section\n");
+			dprint("starting reset section\n");
 		}
 	reset_options
 	'}'	{
-			dprintf("finished reset section\n");
+			dprint("finished reset section\n");
 		}
 	;
 	
@@ -173,13 +174,13 @@ reset_options:
 	
 reset_option:
 	TRIGGERKEY '=' INT INKEY PERIOD	{
-					dprintf("reset count %d\n", $3);
-					dprintf("reset period %d\n", $5);
+					dprint("reset count %d\n", $3);
+					dprint("reset period %d\n", $5);
 					files[filenum].re[files[filenum].renum].threshold.config.reset_count = $3;
 					files[filenum].re[files[filenum].renum].threshold.config.reset_period = $5;
 				}
 	| COMMANDKEY '=' STRING	{
-					dprintf("reset command: '%s'\n", $3);
+					dprint("reset command: '%s'\n", $3);
 					files[filenum].re[files[filenum].renum].threshold.config.reset_cmd = $3;
 				}
 	;

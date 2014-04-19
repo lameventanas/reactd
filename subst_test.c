@@ -20,7 +20,7 @@ int main(int argc, char *argv[]) {
 	
 	int options = PCRE_SUBST_DEFAULT;
 	options |= PCRE_SUBST_NO_SPECIAL_CHARS;
-	options |= PCRE_SUBST_SQUOTE_ESCAPE_SUBJ;
+	options |= PCRE_SUBST_SHELL_ESCAPE_SUBJ;
 	
 	re = pcre_compile(argv[2], 0, &error_msg, &error_off, pcre_tables);
 	

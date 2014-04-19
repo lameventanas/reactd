@@ -46,6 +46,7 @@ typedef struct {
 		pcre *re;
 		pcre_extra *re_studied;
 		char *cmd;
+		pcre_subst_data *cmd_subst;
 		char *mail;
 		tthreshold threshold; // keeps threshold config and occurrances
 	} re[MAXREACTIONS];
@@ -65,9 +66,4 @@ char *mail;
 char *logging;
 float version;
 
-#ifdef DEBUG
-#define dprintf printf
-#else
-#define dprintf
-#endif
 #endif
