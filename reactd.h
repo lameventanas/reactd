@@ -33,6 +33,7 @@
 
 #include <assert.h>
 
+#include "log.h"
 #include "keylist.h"
 #include "threshold.h"
 
@@ -56,6 +57,8 @@ typedef struct {
 
 tfile files[MAXFILES];
 
+log_h *logh; // log handle
+
 struct pollfd pollwatch; // used to store inotify file descriptor and to poll it for read events
 int unwatchedfiles; // number of unwatched files (files in the config file but that are not being watched because they don't exist)
 
@@ -64,6 +67,9 @@ int filenum; // number of files we are watching
 char *pidfile;
 char *mail;
 char *logging;
+char *loglevel;
+char *logprefix;
+char *logfile;
 float version;
 
 #endif

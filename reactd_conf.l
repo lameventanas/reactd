@@ -5,6 +5,7 @@
 
 %{
 #include "reactd_conf.tab.h"
+#include "log.h"
 
 int linenr = 1;
 
@@ -17,7 +18,10 @@ int linenr = 1;
 @options	{ return OPTIONSKEY; }
 pidfile		{ return PIDFILEKEY; }
 mail		{ return MAILKEY; }
-log		{ return LOGKEY; }
+logging		{ return LOGGINGKEY; }
+logfile		{ return LOGFILEKEY; }
+logprefix	{ return LOGPREFIXKEY; }
+loglevel	{ return LOGLEVELKEY; }
 command		{ return COMMANDKEY; }
 threshold	{ return THRESHOLDKEY; }
 key		{ return KEYKEY; }

@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <getopt.h>
 
+#include "log.h"
 #include "reactd.h"
 #include "threshold.h"
 
@@ -45,6 +46,7 @@ int parseConfig(char *configfile) {
 	pidfile = NULL;
 	mail = NULL;
 	logging = NULL;
+	loglevel = LOG_INFO;
 */	
 	int i;
 	
@@ -70,32 +72,32 @@ void react(tfile *file) {
 	int r;
 	char *end;
 	
-	dprint("Reacting on file %s", file->name);
+	logw(logh, LOG_DEBUG, "Reacting on file %s", file->name);
 	// check if the file was truncated
 	if (-1 == stat(file->name, &st))
 		return;
 	if (st.st_size < file->pos) {
-		dprint("File %s shrunk, reseting", file->name);
+		logw(logh, LOG_DEBUG, "File %s shrunk, reseting", file->name);
 		file->pos = 0;
 	}
 	
 	fd = open(file->name, O_RDONLY);
 	if (fd == -1) {
-		fprintf(stderr, "Error opening %s: %s\n", file->name, strerror(errno));
+		logw(logh, LOG_ERR, "Error opening %s: %s", file->name, strerror(errno));
 		return;
 	}
 	
 	do {
-		dprint("Seeking %s to position %d", file->name, file->pos);
+		logw(logh, LOG_DEBUG, "Seeking %s to position %d", file->name, file->pos);
 		if (-1 == lseek(fd, file->pos, SEEK_SET)) {
-			fprintf(stderr, "Error seeking %s to position %d: %s\n", file->name, file->pos, strerror(errno));
+			logw(logh, LOG_ERR, "Error seeking %s to position %d: %s", file->name, file->pos, strerror(errno));
 			close(fd);
 		}
 		r = read(fd, buf, sizeof(buf));
-		dprint("Read %d bytes", r);
+		logw(logh, LOG_DEBUG, "Read %d bytes", r);
 		
 		if (r == -1) {
-			fprintf(stderr, "Error reading from %s: %s\n", file->name, strerror(errno));
+			logw(logh, LOG_ERR, "Error reading from %s: %s", file->name, strerror(errno));
 			close(fd);
 			return;
 		}
@@ -103,7 +105,7 @@ void react(tfile *file) {
 			end = strchr(buf, 0xa);
 			if (end == NULL) {
 				if (r == sizeof(buf)) { // if filled the buffer but there is no newline, process the whole buffer as if it is a complete line
-					dprint("Buffer is full but no newline found, taking whole buffer");
+					logw(logh, LOG_DEBUG, "Buffer is full but no newline found, taking whole buffer");
 					end = &buf[sizeof(buf) - 1];
 					file->pos--; // re-read the last byte (because we will overwrite it in buf)
 				} /*
@@ -119,7 +121,7 @@ void react(tfile *file) {
 			}
 			*end = 0; // null terminate string
 			file->pos += strlen(buf) + 1; // set next position to read from this file
-			dprint(" -->%s<-- (%d bytes)", buf, strlen(buf));
+			logw(logh, LOG_DEBUG, " -->%s<-- (%d bytes)", buf, strlen(buf));
 
 			// match against all configured REs for this file
 			int i;
@@ -140,7 +142,7 @@ void react(tfile *file) {
 						key = pcre_subst_replace(buf, file->re[i].threshold.config.re_subst_key, buf_ret, 3*MAX_RE_CAPTURES, buf_matches, PCRE_SUBST_DEFAULT);
 					
 						run = threshold_record_occurrance(&file->re[i].threshold, key);
-						dprint("Recorded occurrance of %s, run: %d", key, run);
+						logw(logh, LOG_DEBUG, "Recorded occurrance of %s, run: %d", key, run);
 					
 						free(key);
 					}
@@ -155,7 +157,7 @@ void react(tfile *file) {
 					if (run) {
 						char *cmd = pcre_subst_replace(buf, file->re[i].cmd_subst, buf_ret, 3*MAX_RE_CAPTURES, buf_matches, PCRE_SUBST_SHELL_ESCAPE_SUBJ);
 						
-						dprint("*** Running cmd: %s", cmd);
+						logw(logh, LOG_DEBUG, "*** Running cmd: %s", cmd);
 						system(cmd);
 						free(cmd);
 					}
@@ -172,19 +174,19 @@ void update_all_thresholds() {
 	int j;
 	keylist *thkey;
 	
-	dprint("update_all_thresholds");
+	logw(logh, LOG_DEBUG, "update_all_thresholds");
 	for (i = 0; i < filenum; i++) {
 		for (j = 0; j < files[i].renum; j++) {
 			// if there is a reset for this threshold
 			if (files[i].re[j].threshold.config.trigger_period > 0) {
-				dprint("Checking reset of threshold for file %d re %d", i, j);
+				logw(logh, LOG_DEBUG, "Checking reset of threshold for file %d re %d", i, j);
 				for (thkey = files[i].re[j].threshold.occurrances; thkey != NULL; thkey = thkey->next) {
-					dprint("Checking key %s", thkey->key);
+					logw(logh, LOG_DEBUG, "Checking key %s", thkey->key);
 					int run = threshold_update_status(&files[i].re[j].threshold, thkey->key);
-					dprint("Running reset command for key %s: %d", thkey->key, run);
+					logw(logh, LOG_DEBUG, "Running reset command for key %s: %d", thkey->key, run);
 					if (run) {
 						// the key will be in an environment variable (maybe I should do some replacement thing)
-						dprint(" *** Running reset command for key %s: %s", thkey->key, files[i].re[j].threshold.config.reset_cmd);
+						logw(logh, LOG_DEBUG, " *** Running reset command for key %s: %s", thkey->key, files[i].re[j].threshold.config.reset_cmd);
 						system(files[i].re[j].threshold.config.reset_cmd);
 					}
 				}
@@ -225,6 +227,10 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	
+	logh = log_open(logtype_str(logging, LOG_TO_SYSLOG), loglevel_str(loglevel, LOG_INFO), logprefix, logfile);
+	logw(logh, LOG_INFO, "Starting reactd");
+	
+	
 	// pcre vars
 	const unsigned char *pcre_tables = pcre_maketables();
 	const char *error_msg;
@@ -232,16 +238,16 @@ int main(int argc, char **argv) {
 #define PCRE_OPTIONS 0
 	
 	dprint_init();
-	dprint("Global options:\nversion: %f\npidfile: %s\nlogging: %s", version, pidfile, logging);
+	dprint("Global options:\nversion: %f\npidfile: %s\nlogging: %s\nloglevel: %d\n", version, pidfile, logging, loglevel);
 	int i, j;
 	for (i = 0; i < filenum; i++) {
-		dprint(" * File %d: %s", i, files[i].name);
+		logw(logh, LOG_DEBUG, " * File %d: %s", i, files[i].name);
 		
 		for (j = 0; j < files[i].renum; j++) {
 			files[i].re[j].re = pcre_compile(files[i].re[j].str, PCRE_OPTIONS, &error_msg, &error_off, pcre_tables);
 			
 			if (! files[i].re[j].re) {
-				fprintf(stderr, "Error in regular expression '%s' at %d: %s\n", files[i].re[j].str, error_off, error_msg);
+				logw(logh, LOG_ERR, "Error in regular expression '%s' at %d: %s\n", files[i].re[j].str, error_off, error_msg);
 				return 1;
 			}
 			
@@ -253,17 +259,17 @@ int main(int argc, char **argv) {
 				files[i].re[j].threshold.config.re_subst_key = pcre_subst_study(files[i].re[j].threshold.config.key, PCRE_SUBST_DEFAULT);
 			}
 				
-			dprint("    * re %d: %s", j, files[i].re[j].str);
-			dprint("       * cmd: %s", files[i].re[j].cmd);
-			dprint("       * mail: %s", files[i].re[j].mail);
-			dprint("       * threshold key: %s", files[i].re[j].threshold.config.key);
-			dprint("       * threshold trigger count: %d", files[i].re[j].threshold.config.trigger_count);
-			dprint("       * threshold trigger period: %d", files[i].re[j].threshold.config.trigger_period);
-			dprint("       * threshold reset count: %d", files[i].re[j].threshold.config.reset_count);
-			dprint("       * threshold reset period: %d", files[i].re[j].threshold.config.reset_period);
-			dprint("       * threshold reset cmd: %d", files[i].re[j].threshold.config.reset_cmd);
+			logw(logh, LOG_DEBUG, "    * re %d: %s", j, files[i].re[j].str);
+			logw(logh, LOG_DEBUG, "       * cmd: %s", files[i].re[j].cmd);
+			logw(logh, LOG_DEBUG, "       * mail: %s", files[i].re[j].mail);
+			logw(logh, LOG_DEBUG, "       * threshold key: %s", files[i].re[j].threshold.config.key);
+			logw(logh, LOG_DEBUG, "       * threshold trigger count: %d", files[i].re[j].threshold.config.trigger_count);
+			logw(logh, LOG_DEBUG, "       * threshold trigger period: %d", files[i].re[j].threshold.config.trigger_period);
+			logw(logh, LOG_DEBUG, "       * threshold reset count: %d", files[i].re[j].threshold.config.reset_count);
+			logw(logh, LOG_DEBUG, "       * threshold reset period: %d", files[i].re[j].threshold.config.reset_period);
+			logw(logh, LOG_DEBUG, "       * threshold reset cmd: %d", files[i].re[j].threshold.config.reset_cmd);
 			if (files[i].re[j].threshold.config.trigger_count > 0) {
-				dprint("       * threshold subst key data: 0x%X", files[i].re[j].threshold.config.re_subst_key);
+				logw(logh, LOG_DEBUG, "       * threshold subst key data: 0x%X", files[i].re[j].threshold.config.re_subst_key);
 				// pcre_subst_print(files[i].re[j].threshold.config.re_subst_key);
 			}
 		}
@@ -275,7 +281,7 @@ int main(int argc, char **argv) {
 	unwatchedfiles = filenum; // number of files not currently watched
 	
 	if (pollwatch.fd == -1) {
-		fprintf(stderr, "Error in inotify_init(): %s\n", strerror(errno));
+		logw(logh, LOG_ERR, "Error in inotify_init(): %s", strerror(errno));
 		exit(1);
 	}
 	
@@ -307,14 +313,14 @@ int main(int argc, char **argv) {
 	// that way the poll timeout will only be used to reset thresholds, and also I won't miss the first writes of an unmonitored file (until the first timeout passes), but this is hard, and also, the directory itself could be deleted and created again, then nothing will be monitored anymore inside it
 	while (1) {
 		polltimeout = unwatchedfiles > 0 ? 5000 : -1;
-		dprint("%d files configured (%d unmonitored) timeout: %d", filenum, unwatchedfiles, polltimeout);
+		logw(logh, LOG_DEBUG, "%d files configured (%d unmonitored) timeout: %d", filenum, unwatchedfiles, polltimeout);
 		pollret = poll(&pollwatch, 1, polltimeout);
 		
 		if (pollret < 0) {
 			if (errno == EINTR || errno == EAGAIN) {
 				continue;
 			} else {
-				fprintf(stderr, "Error in poll: %s\n", strerror(errno));
+				logw(logh, LOG_ERR, "Error in poll: %s", strerror(errno));
 				exit(1);
 			}
 		}
@@ -324,11 +330,11 @@ int main(int argc, char **argv) {
 			int i;
 			for (i = 0; i < filenum && unwatchedfiles > 0; i++) {
 				if (files[i].watchfd == -1) {
-					// dprint("Found unwatched file: %s", files[i].name);
+					// logw(logh, LOG_DEBUG, "Found unwatched file: %s", files[i].name);
 					files[i].watchfd = inotify_add_watch(pollwatch.fd, files[i].name, INOTIFY_EVENTS);
 					if (files[i].watchfd != -1) {
 						files[i].pos = 0;
-						dprint("Now monitoring %s", files[i].name);
+						logw(logh, LOG_DEBUG, "Now monitoring %s", files[i].name);
 						unwatchedfiles--;
 					}
 				}
@@ -346,7 +352,7 @@ int main(int argc, char **argv) {
 			if (errno == EINTR || errno == EAGAIN) {
 				continue;
 			} else {
-				fprintf(stderr, "Error reading inotify event: %s\n", strerror(errno));
+				logw(logh, LOG_ERR, "Error reading inotify event: %s", strerror(errno));
 				exit(1);
 			}
 		}
@@ -360,7 +366,7 @@ int main(int argc, char **argv) {
 			for (i = 0; i < filenum; i++) {
 				if (files[i].watchfd == ev->wd) {
 					file = &files[i];
-					dprint("Affected file: %s", file->name);
+					logw(logh, LOG_DEBUG, "Affected file: %s", file->name);
 					break;
 				}
 			}
@@ -370,7 +376,7 @@ int main(int argc, char **argv) {
 				
 			} else if (ev->mask & IN_IGNORED)  {
 				file->watchfd = -1;
-				dprint("File %s is now unwatched", file->name);
+				logw(logh, LOG_DEBUG, "File %s is now unwatched", file->name);
 				unwatchedfiles++;
 			}
 			
@@ -380,6 +386,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	
+	log_close(logh);
 	
 	return EXIT_SUCCESS;
 }

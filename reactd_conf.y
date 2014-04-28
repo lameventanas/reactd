@@ -24,7 +24,10 @@ int yydebug=1;
 %token OPTIONSKEY
 %token PIDFILEKEY
 %token MAILKEY
-%token LOGKEY
+%token LOGGINGKEY
+%token LOGFILEKEY
+%token LOGPREFIXKEY
+%token LOGLEVELKEY
 %token COMMANDKEY
 %token THRESHOLDKEY
 %token KEYKEY
@@ -67,11 +70,14 @@ option_lines:
 	;
 	
 option_line:
-	PIDFILEKEY '=' STRING	{ pidfile = $3; }
-	| MAILKEY '=' STRING	{ mail = $3; }
-	| LOGKEY '=' STRING	{ logging = $3; }
+	PIDFILEKEY '=' STRING		{ pidfile = $3; }
+	| MAILKEY '=' STRING		{ mail = $3; }
+	| LOGGINGKEY '=' STRING		{ logging = $3; }
+	| LOGFILEKEY '=' STRING		{ logfile = $3; }
+	| LOGPREFIXKEY '=' STRING	{ logprefix = $3; }
+	| LOGLEVELKEY '=' STRING	{ loglevel = $3; }
 	;
-	
+
 body:
 	file_entries
 	;
