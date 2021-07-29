@@ -1,6 +1,3 @@
-/*
- * $Id$
- */
 #ifndef KEYLIST_H
 #define KEYLIST_H
 

@@ -1,5 +1,3 @@
-# $Id$
-
 CFLAGS = -pipe -ggdb
 
 all: reactd

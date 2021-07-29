@@ -1,7 +1,3 @@
-/*
- * $Id$
- */
-
 #include <stdlib.h>
 #include "threshold.h"
 

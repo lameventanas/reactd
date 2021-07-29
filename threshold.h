@@ -1,6 +1,3 @@
-/*
- * $Id$
- */
 #ifndef THRESHOLD_H
 #define THRESHOLD_H
 

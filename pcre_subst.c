@@ -1,6 +1,5 @@
-/* $Id$ */
-
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <pcre.h>
 #include "pcre_subst.h"

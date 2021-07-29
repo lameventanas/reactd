@@ -1,5 +1,3 @@
-/* $Id$ */
-
 #ifndef PCRE_SUBST_H
 #define PCRE_SUBST_H
 

@@ -1,5 +1,4 @@
 /*
- * $Id$
  * flex input to generate lexical analyzer for configuration file parser
  */
 

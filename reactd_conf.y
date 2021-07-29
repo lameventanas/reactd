@@ -1,5 +1,4 @@
 /*
- * $Id$
  * bison input to generate reactd configuration file parser
  */
 

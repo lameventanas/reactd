@@ -1,7 +1,3 @@
-/*
- * $Id$
- */
-
 #ifndef REACTD_H
 #define REACTD_H
 #define DEFAULT_CONFIG "/etc/reactd.conf"
@@ -55,21 +51,18 @@ typedef struct {
 	int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
 } tfile;
 
-tfile files[MAXFILES];
-
-log_h *logh; // log handle
-
-struct pollfd pollwatch; // used to store inotify file descriptor and to poll it for read events
-int unwatchedfiles; // number of unwatched files (files in the config file but that are not being watched because they don't exist)
-
-int filenum; // number of files we are watching
-
-char *pidfile;
-char *mail;
-char *logging;
-char *loglevel;
-char *logprefix;
-char *logfile;
-float version;
+// these are defined in reactd.c
+extern tfile files[MAXFILES];
+extern log_h *logh; // log handle
+extern struct pollfd pollwatch; // used to store inotify file descriptor and to poll it for read events
+extern int unwatchedfiles; // number of unwatched files (files in the config file but that are not being watched because they don't exist)
+extern int filenum; // number of files we are watching
+extern char *pidfile;
+extern char *mail;
+extern char *logging;
+extern char *loglevel;
+extern char *logprefix;
+extern char *logfile;
+extern float version;
 
 #endif
