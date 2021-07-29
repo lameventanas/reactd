@@ -21,9 +21,9 @@
 // for strchr:
 #include <string.h>
 
-// #define INOTIFY_EVENTS		(IN_MODIFY|IN_DELETE_SELF|IN_MOVE_SELF|IN_UNMOUNT)
-#define INOTIFY_EVENTS		IN_MODIFY
-#define INOTIFY_NEVENTS_NUM	4
+// #define INOTIFY_EVENTS        (IN_MODIFY|IN_DELETE_SELF|IN_MOVE_SELF|IN_UNMOUNT)
+#define INOTIFY_EVENTS        IN_MODIFY
+#define INOTIFY_NEVENTS_NUM    4
 
 #include <poll.h>
 
@@ -36,19 +36,19 @@
 #define MAX_RE_CAPTURES 10 // maximum number of RE captures
 
 typedef struct {
-	char *name;
-	int renum;
-	struct {
-		char *str;
-		pcre *re;
-		pcre_extra *re_studied;
-		char *cmd;
-		pcre_subst_data *cmd_subst;
-		char *mail;
-		tthreshold threshold; // keeps threshold config and occurrances
-	} re[MAXREACTIONS];
-	off_t pos; // position read until now
-	int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
+    char *name;
+    int renum;
+    struct {
+        char *str;
+        pcre *re;
+        pcre_extra *re_studied;
+        char *cmd;
+        pcre_subst_data *cmd_subst;
+        char *mail;
+        tthreshold threshold; // keeps threshold config and occurrances
+    } re[MAXREACTIONS];
+    off_t pos; // position read until now
+    int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
 } tfile;
 
 // these are defined in reactd.c

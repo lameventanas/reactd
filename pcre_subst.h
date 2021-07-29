@@ -6,9 +6,9 @@
 #define PCRE_SUBST_REPLACEMENT 1
 #define PCRE_SUBST_SUBJECT 2
 typedef struct {
-	int type;
-	char *s; // string from replacement, when type = PCRE_SUBST_REPLACEMENT
-	int num; // number of backreference, when type = PCRE_SUBST_SUBJECT
+    int type;
+    char *s; // string from replacement, when type = PCRE_SUBST_REPLACEMENT
+    int num; // number of backreference, when type = PCRE_SUBST_SUBJECT
 } pcre_subst_data;
 
 

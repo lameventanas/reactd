@@ -25,10 +25,10 @@
  */
 
 typedef struct {
-	int level;
-	int type;
-	char *prefix; // used with strftime
-	FILE *fh;
+    int level;
+    int type;
+    char *prefix; // used with strftime
+    FILE *fh;
 } log_h;
 
 log_h *log_open(int logtype, int loglevel, char *prefix, char *file);

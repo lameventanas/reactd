@@ -7,9 +7,9 @@
  */
 
 typedef struct _keylist {
-	char *key;
-	void *value;
-	struct _keylist *next;
+    char *key;
+    void *value;
+    struct _keylist *next;
 } keylist;
 
 /*

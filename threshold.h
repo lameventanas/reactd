@@ -14,16 +14,16 @@
  * threshold structure: keeps configuration and tracks occurrances and triggered status
  */
 typedef struct {
-	struct {
-		char *key;
-		pcre_subst_data *re_subst_key; // constructed from key
-		int trigger_count;
-		int trigger_period;
-		int reset_count;
-		int reset_period;
-		char *reset_cmd;
-	} config;
-	keylist *occurrances; // hash of key => occurrances_rec
+    struct {
+        char *key;
+        pcre_subst_data *re_subst_key; // constructed from key
+        int trigger_count;
+        int trigger_period;
+        int reset_count;
+        int reset_period;
+        char *reset_cmd;
+    } config;
+    keylist *occurrances; // hash of key => occurrances_rec
 } tthreshold;
 
 
@@ -33,12 +33,12 @@ typedef struct {
  * Thereafter, if the reset threshold is reached, the "triggered" status is reset
  */
 typedef struct {
-	// int lastupdate; // records when was the last update (to prevent unnecessary updates to triggered status UNUSED?)
-	int start; // pointer to first timestamp occurrance in the ring
-	int count; // number of elements stored
-	int size; // size of the ring, this is max(threshold_count, reset_count)
-	time_t *timestamp; // holds last X timestamps of occurrances in a circular buffer
-	int triggered; // 0 = normal, 1 = triggered
+    // int lastupdate; // records when was the last update (to prevent unnecessary updates to triggered status UNUSED?)
+    int start; // pointer to first timestamp occurrance in the ring
+    int count; // number of elements stored
+    int size; // size of the ring, this is max(threshold_count, reset_count)
+    time_t *timestamp; // holds last X timestamps of occurrances in a circular buffer
+    int triggered; // 0 = normal, 1 = triggered
 } occurrances_rec;
 
 /*
