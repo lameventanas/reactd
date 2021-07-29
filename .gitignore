@@ -1,0 +1,4 @@
+*.o
+reactd
+*.tab.?
+*.lex.yy.c
