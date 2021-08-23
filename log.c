@@ -62,9 +62,14 @@ void log_close(log_h *logh) {
     } else {
         fclose(logh->fh);
     }
+    if (logh->prefix)
+        free(logh->prefix);
+    free(logh);
 }
 
 int logtype_str(char *logtype, int fallback) {
+    if (logtype == NULL)
+        return fallback;
     if (!strcmp(logtype, "syslog")) {
         return LOG_TO_SYSLOG;
     } else     if (!strcmp(logtype, "file")) {
