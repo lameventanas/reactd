@@ -1,7 +1,7 @@
 #ifndef PCRE_SUBST_H
 #define PCRE_SUBST_H
 
-// pcre_subst_study returns a null-terminated array of pcre_subst_data
+// pcre_subst_study returns a null-terminated array of pcre_subst
 #define PCRE_SUBST_END 0
 #define PCRE_SUBST_REPLACEMENT 1
 #define PCRE_SUBST_SUBJECT 2
@@ -9,7 +9,7 @@ typedef struct {
     int type;
     char *s; // string from replacement, when type = PCRE_SUBST_REPLACEMENT
     int num; // number of backreference, when type = PCRE_SUBST_SUBJECT
-} pcre_subst_data;
+} pcre_subst;
 
 
 // default: substitutes \\ \n \r \t \e \a \f in replacement substrings and does not quote subject substrings
@@ -22,25 +22,25 @@ typedef struct {
 #define PCRE_SUBST_SHELL_ESCAPE_SUBJ 2
 
 /*
- * Studies a replacement string.
- * Result is a structure used by pcre_subst_replace()
+ * Create a subst structure.
+ * Result can be used repeatedly by pcre_subst_replace()
  * Once a replacement string has been studied, it can be modified or freed.
  */
-pcre_subst_data *pcre_subst_study(char *replacement, int options);
+pcre_subst *pcre_subst_create(char *s, int options);
 
 /*
- * Replaces a subject already matched with pcre_exec() into a replacement string
+ * Replaces matches returned by pcre_exec() into pcre_subst structure, returning a string
  * subject: the string matched with pcre_exec
- * data: structure as returned by pcre_subst_study
+ * subst: structure as returned by pcre_subst_study
  * ovector: same as returned by pcre_exec()
  * ovecsize: same used with pcre_exec()
  * return: a new allocated string with the substitutions made, must be freed by caller
  */
-char *pcre_subst_replace(char *subject, pcre_subst_data *data, int *ovector, int ovecsize, int matches, int options);
+char *pcre_subst_replace(char *subject, pcre_subst *subst, int *ovector, int ovecsize, int matches, int options);
 
 /*
  * Free replacement data returned by pcre_subst_study()
  */
-void pcre_subst_free(pcre_subst_data *data);
+void pcre_subst_free(pcre_subst *data);
 
 #endif
