@@ -7,7 +7,7 @@
 #include "log.h"
 
 int linenr = 1;
-
+;
 %}
 
 %%
@@ -16,16 +16,15 @@ int linenr = 1;
 @version   { return VERSIONKEY; }
 @options   { return OPTIONSKEY; }
 pidfile    { return PIDFILEKEY; }
-mail       { return MAILKEY; }
 logging    { return LOGGINGKEY; }
 logfile    { return LOGFILEKEY; }
 logprefix  { return LOGPREFIXKEY; }
 loglevel   { return LOGLEVELKEY; }
 command    { return COMMANDKEY; }
-threshold  { return THRESHOLDKEY; }
 key        { return KEYKEY; }
 trigger    { return TRIGGERKEY; }
 reset      { return RESETKEY; }
+timeout    { return TIMEOUTKEY; }
 in         { return INKEY; }
 [0-9]+[ \t]+(second|minute|hour|day)s?    {
     int num;
@@ -40,17 +39,29 @@ in         { return INKEY; }
     } else {
         yylval.ival = num * 60 * 60 * 24;
     }
-    return PERIOD;
+    return TIMEPERIOD;
 }
-[0-9]+\.[0-9]+  { yylval.fval = atof(yytext); return FLOAT; }
+
+
 [0-9]+          { yylval.ival = atoi(yytext); return INT; }
-\".*\"          {
+\".+\"          {
     // we have to copy because we can't rely on yytext not changing underneath us:
     yylval.sval = strndup(yytext+1, strlen(yytext)-2);
+    printf("strndup: %p %s\n", yylval.sval, yylval.sval);
     return STRING;
 }
+
+\. { return DOT; }
+
+
 [\{\},=]  { return yytext[0]; } // return single characters that are used in the config file
 #.*        ; // ignore comments
+
+<<EOF>> {
+    printf("EOF of config file\n");
+    yy_delete_buffer(YY_CURRENT_BUFFER);
+    yyterminate();
+}
 
 %%
 /*
