@@ -71,18 +71,14 @@ typedef struct {
     char *loglevel;
     char *logprefix;
 } tglobal_cfg;
-// tglobal_cfg global_cfg;
 
 // defined in reactd_conf.y
 extern tglobal_cfg cfg;
 extern int parse_config(char *filename);
 
 // these are defined in reactd.c
-// extern keylist *fmon_cfgs; // fmon_cfg keylist
-// extern tfmon *fmons; // fmons list ended by null
 extern log_h *logh; // log handle
 extern struct pollfd pollwatch; // used to store inotify file descriptor and to poll it for read events
 extern int unwatchedfiles; // number of unwatched files (files in the config file but that are not being watched because they don't exist)
-// extern int filenum; // number of files we are watching
 
 #endif

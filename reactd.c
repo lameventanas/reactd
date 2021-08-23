@@ -19,8 +19,6 @@
 #include "log.h"
 #include "reactd.h"
 
-// extern FILE *yyin;
-// extern int yyparse();
 extern tfile *tfs;
 
 unsigned char *pcre_tables = NULL;
@@ -136,9 +134,6 @@ void free_config() {
 // callback for tail_lines
 // runs record_hit function
 void proc_line(tfile *tf, char *s) {
-    // int matches[3 * MAX_RE_CAPTURES];
-
-//for (int i = 0; tf->re[i].str; i++) {
     for (re *re = tf->re; re->str; re++) {
         int capture_cnt; // used to determine number of capture groups
         pcre_fullinfo(re->re, re->re_studied, PCRE_INFO_CAPTURECOUNT, &capture_cnt);
@@ -382,7 +377,6 @@ int main(int argc, char **argv) {
     // Initialize global inotify fd and poll structure
     pollwatch.fd = inotify_init();
     pollwatch.events = POLLIN;
-    // unwatchedfiles = filenum; // number of files not currently watched
 
     if (pollwatch.fd == -1) {
         logw(logh, LOG_ERR, "Error in inotify_init(): %s", strerror(errno));
