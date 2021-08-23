@@ -1,7 +1,7 @@
 CFLAGS = -pipe -ggdb
 
 PROGS = reactd
-TESTS = test_reset_list
+TESTS = test_reset_list test_ring
 
 all: $(PROGS)
 tests: $(TESTS)
@@ -14,13 +14,15 @@ debug: all
 ifeq ($(DEBUG),)
   CFLAGS += -ggdb -O3 -std=gnu99
 else
-  CFLAGS += -ggdb -std=gnu99 -DDEBUG -DDEBUG_RESET_LIST
+  CFLAGS += -ggdb -std=gnu99 -DDEBUG -DDEBUG_RESET_LIST -DDEBUG_RING
 endif
 
 objects_reactd = reactd_conf.tab.o reactd_conf.lex.yy.o reactd.o keylist.o pcre_subst.o debug.o log.o ring.o reset_list.o
 objects_keylist_test = keylist_test.o keylist.o debug.o
 objects_threshold_test = threshold_test.o threshold.o keylist.o debug.o
 objects_subst_test = subst_test.o pcre_subst.o debug.o
+objects_reset_list_test = test_reset_list Test_reset_list.o reset_list_test.o reset_list.o Test_reset_list.c
+objects_ring_test =  test_ring Test_ring.o ring_test.o ring.o Test_ring.c
 
 %.o: %.c %.h
 	$(CC) -c $(CFLAGS) $*.c -o $*.o
@@ -44,11 +46,17 @@ subst_test: $(objects_subst_test)
 	$(CC) $(CFLAGS) $(objects_subst_test) -lpcre -o subst_test
 
 clean:
-	rm -f reactd reactd_conf.tab.c reactd_conf.tab.h reactd_conf.lex.yy.c $(objects_reactd) keylist_test $(objects_keylist_test) threshold_test $(objects_threshold_test) subst_test $(objects_subst_test) test_reset_list Test_reset_list.o Test_reset_list.c
+	rm -f reactd reactd_conf.tab.c reactd_conf.tab.h reactd_conf.lex.yy.c $(objects_reactd) keylist_test $(objects_keylist_test) threshold_test $(objects_threshold_test) subst_test $(objects_subst_test) $(objects_reset_list_test) $(objects_ring_test)
 
 # Unit Tests
 Test_reset_list.c: reset_list_test.c
 	./make-tests.sh $< > $@
 
 test_reset_list: CuTest.c Test_reset_list.o reset_list_test.o reset_list.o
+	$(CC) $(CFLAGS) -o $@ $^
+
+Test_ring.c: ring_test.c
+	./make-tests.sh $< > $@
+
+test_ring: CuTest.c Test_ring.o ring_test.o ring.o
 	$(CC) $(CFLAGS) -o $@ $^

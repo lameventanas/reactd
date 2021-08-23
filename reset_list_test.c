@@ -5,6 +5,10 @@
 #include "CuTest.h"
 #include "reset_list.h"
 
+#ifndef DEBUG_RESET_LIST
+#define reset_list_print(x)
+#endif
+
 void list_callback(char *key, char *cmd) {
     printf(" * callback received item with key=%s\n", key);
 }
