@@ -12,7 +12,7 @@ void dprint(const char *fmt, ...) {
     va_list ap;
 
     va_start(ap, fmt);
-    fprintf(stderr, "%04d: ", time(NULL) - dprint_time);
+    fprintf(stderr, "%04ld: ", time(NULL) - dprint_time);
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     va_end(ap);

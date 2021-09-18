@@ -27,11 +27,9 @@
 #include <assert.h>
 
 #include "log.h"
-#include "keylist.h"
+#include "avl.h"
 #include "ring.h"
 #include "pcre_subst.h"
-
-#define MAX_RE_CAPTURES 10 // maximum number of RE captures, including \0
 
 // params to tail log file
 // #define INOTIFY_EVENTS IN_ALL_EVENTS
@@ -51,7 +49,7 @@ typedef struct {
     pcre *re;
     pcre_extra *re_studied;
     pcre_subst *key;
-    keylist *hits; // key => ring where key is presumably the IP
+    struct avl_table *hitlist; // list of keyhits, where key is presumably the IP
     unsigned int trigger_cnt; // max number of hits (size of ring)
 } re;
 
@@ -61,6 +59,11 @@ typedef struct {
     off_t pos; // position read until now
     int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
 } tfile; // tailed file type
+
+typedef struct {
+    char *key;  // key string used to locate hitlist in avl tree
+    ring *hits; // ring with time of each hit
+} keyhits;
 
 typedef struct {
     unsigned int version_major;
@@ -80,5 +83,7 @@ extern int parse_config(char *filename);
 extern log_h *logh; // log handle
 extern struct pollfd pollwatch; // used to store inotify file descriptor and to poll it for read events
 extern int unwatchedfiles; // number of unwatched files (files in the config file but that are not being watched because they don't exist)
+
+int keyhits_cmp(const void *a, const void *b, void *param);
 
 #endif

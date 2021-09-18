@@ -1,0 +1,3 @@
+- Add lexer keys for logging targets (eg: stderr, stdout), and log levels
+- Allow arguments to commands, replace capture groups in arguments/commands
+- Create test unit for subst library

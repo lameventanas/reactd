@@ -3,6 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <stdio.h>
 
 #include "log.h"
 
@@ -18,14 +19,17 @@ log_h *log_open(int logtype, int loglevel, char *prefix, char *file) {
         logh->prefix = NULL;
 
     if (logtype == LOG_TO_FILE) {
+        printf("logging to file: %s\n", file);
         logh->fh = fopen(file, "a");
         if (logh->fh == NULL) {
             fprintf(stderr, "Error opening %s: %s\n", file, strerror(errno));
             logh->fh = fdopen(2, "a"); // log to STDERR instead
         }
     } else if (logtype == LOG_TO_SYSLOG) {
+        puts("logging to syslog");
         openlog(NULL, 0, LOG_DAEMON);
     } else { // stdout or stderr
+        printf("logging to FD %d\n", logtype);
         logh->fh = fdopen(logtype, "a");
     }
     return logh;

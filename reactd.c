@@ -15,6 +15,7 @@
 #include <time.h>
 #include <math.h>
 
+#include "avl.h"
 #include "reset_list.h"
 #include "log.h"
 #include "reactd.h"
@@ -46,27 +47,31 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
     exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 
+
 int run_prog(char *prog) {
     pid_t pid = fork();
     if (pid == 0) {
-        if (daemon(0, 0) < 0) {
-            syslog(LOG_ERR, "daemon: %m");
+        // if (daemon(0, 0) < 0) {
+        if (daemon(0, 1) < 0) {
+            logw(logh, LOG_ERR, "daemon: %m");
             exit(1);
         }
+        printf("Running %s\n", prog);
         execl(prog, prog, NULL);
-        syslog(LOG_ERR, "Could not run %s: %m", prog);
+        printf("Could not run %s: %s\n", strerror(errno));
+        logw(logh, LOG_ERR, "Could not run %s: %m", prog);
         exit(1);
     }
     if (pid < 0) {
-        syslog(LOG_ERR, "Could not fork: %m");
+        logw(logh, LOG_ERR, "Could not fork: %m");
         return 0;
     }
     return 1;
 }
 
-// run reset for a specific key
+// run reset for a specific /*key*/
 void reset_run(char *key, char *cmd) {
-    syslog(LOG_DEBUG, "Resetting item with key %s with cmd %s", key, cmd);
+    logw(logh, LOG_DEBUG, "Resetting item with key %s with cmd %s", key, cmd);
     setenv("REACT_KEY", key, 1);
     run_prog(cmd);
     unsetenv("REACT_KEY");
@@ -76,11 +81,11 @@ void reset_run(char *key, char *cmd) {
 // check if any items must be reset
 // returns timeout until next check should run
 int reset_check() {
-    syslog(LOG_DEBUG, "reset_check");
+    logw(logh, LOG_DEBUG, "reset_check");
     time_t t = time(NULL);
     reset_list_run(reset_list, t, reset_run);
     time_t ret = reset_list_next_reset(reset_list);
-    syslog(LOG_DEBUG, "next_reset: %d", ret);
+    logw(logh, LOG_DEBUG, "next_reset: %ld", ret);
     return ret < 0 ? ret : 1000 * (ret - t) + RESET_GUARD_TIME;
 }
 
@@ -89,8 +94,13 @@ void reset_item_free(time_t t, char *key, char *cmd) {
     free(key);
 }
 
-void free_hits(void *ring) {
-    ring_free(ring, free);
+// callback compare for avl tree
+int keyhits_cmp(const void *a, const void *b, void *param) {
+    return strcmp( ((keyhits *)a)->key, ((keyhits *)b)->key);
+}
+void free_keyhits(void *kh, void *param) {
+    free(((keyhits *)kh)->key);
+    ring_free(((keyhits *)kh)->hits, free);
 }
 void free_config() {
     if (cfg.pidfile)
@@ -120,8 +130,8 @@ void free_config() {
                 pcre_free_study(re->re_studied);
             if (re->key)
                 pcre_subst_free(re->key);
-            if (re->hits)
-                keylist_free(&re->hits, free_hits);
+            if (re->hitlist)
+                avl_destroy(re->hitlist, free_keyhits);
         }
         free(tf->re);
     }
@@ -136,33 +146,43 @@ void free_config() {
 void proc_line(tfile *tf, char *s) {
     for (re *re = tf->re; re->str; re++) {
         int capture_cnt; // used to determine number of capture groups
+
+        // TODO: move capture_cnt to tf structure?
         pcre_fullinfo(re->re, re->re_studied, PCRE_INFO_CAPTURECOUNT, &capture_cnt);
         capture_cnt++; // add space for \0
         int *matches = malloc(3 * capture_cnt * sizeof(int));
 
-        syslog(LOG_DEBUG, "matching re %s against %s", re->str, s);
+        logw(logh, LOG_DEBUG, "matching re %s against %s", re->str, s);
         int match_cnt = pcre_exec(re->re, re->re_studied, s, strlen(s), 0, 0, matches, 3 * capture_cnt);
         if (match_cnt > 0) {
-            syslog(LOG_INFO, "%s matched RE %s count=%d", tf->name, re->str, match_cnt);
+            logw(logh, LOG_INFO, "%s matched RE %s count=%d", tf->name, re->str, match_cnt);
 
             if (re->key != NULL && re->trigger_cnt > 0) {
-                char *key = pcre_subst_replace(s, re->key, matches, 3*MAX_RE_CAPTURES, match_cnt, 0);
-                syslog(LOG_DEBUG, "got key: %s", key);
-                ring *hits = keylist_get(&re->hits, key);
-                if (hits == NULL) {
-                    syslog(LOG_DEBUG, "creating ring");
-                    hits = ring_init(re->trigger_cnt);
-                    keylist_set(&re->hits, key, hits);
+                char *key = pcre_subst_replace(s, re->key, matches, 3*capture_cnt, match_cnt, 0);
+                logw(logh, LOG_DEBUG, "got key: %s", key);
+
+                keyhits search = {
+                    .key = key,
+                    .hits = NULL
+                };
+
+                keyhits *hits = avl_find(re->hitlist, &search);
+                if (!hits) {
+                    logw(logh, LOG_DEBUG, "creating hit list for %s", key);
+                    hits = malloc(sizeof(keyhits));
+                    hits->key = key;
+                    hits->hits = ring_init(re->trigger_cnt);
+                    avl_insert(re->hitlist, hits);
                 }
                 time_t *hit_time = malloc(sizeof(time_t));
                 time(hit_time);
-                time_t *old_time = ring_put(hits, (void *)hit_time);
+                time_t *old_time = ring_put(hits->hits, (void *)hit_time);
                 if (old_time != NULL)
                     free(old_time);
-                if (ring_count(hits) == re->trigger_cnt) {
-                    time_t *hit_first = ring_get_oldest(hits, 0);
+                if (ring_count(hits->hits) == re->trigger_cnt) {
+                    time_t *hit_first = ring_get_oldest(hits->hits, 0);
                     if (*hit_time - *hit_first <= re->trigger_time) {
-                        syslog(LOG_NOTICE, "%s RE %s triggered by %u hits in %u seconds", tf->name, re->str, ring_get_size(hits), *hit_time - *hit_first);
+                        logw(logh, LOG_DEBUG, "%s RE %s triggered by %u hits in %lu seconds", tf->name, re->str, ring_get_size(hits->hits), *hit_time - *hit_first);
 
                         setenv("REACT_KEY", key, 1);
                         setenv("REACT_FILE", tf->name, 1);
@@ -174,17 +194,18 @@ void proc_line(tfile *tf, char *s) {
                             setenv(k, v, 1);
                             free(v);
                         }
+                        logw(logh, LOG_INFO, "Running %s for %s", re->cmd, key);
                         if (run_prog(re->cmd)) {
                             // TODO: add to unban fifo
-                            syslog(LOG_DEBUG, "Banned key %s for %u seconds", key, re->reset_time);
+                            logw(logh, LOG_DEBUG, "Banned key %s for %u seconds", key, re->reset_time);
                             if (re->reset_cmd != NULL && re->reset_time > 0) {
                                 // NOTE: reset_list_run callback should free key but not reset_cmd
                                 reset_list_add(reset_list, *hit_time + re->reset_time, strdup(key), re->reset_cmd);
                                 if (timeout < 0 || timeout > 1000 * re->reset_time + RESET_GUARD_TIME) {
-                                    syslog(LOG_DEBUG, "Setting timeout to %u", re->reset_time);
+                                    logw(logh, LOG_DEBUG, "Setting timeout to %u", re->reset_time);
                                     timeout = 1000 * re->reset_time + RESET_GUARD_TIME;
                                 }
-                                syslog(LOG_DEBUG, "After ban timeout = %u", timeout);
+                                logw(logh, LOG_DEBUG, "After ban timeout = %u", timeout);
                             }
                         }
                         unsetenv("REACT_FILE");
@@ -209,40 +230,40 @@ void tail_lines(tfile *tf, void (*callback)(tfile *, char *)) {
 
     usleep(EVENT_REACT_TIME);
     if (-1 == stat(tf->name, &st)) {
-        syslog(LOG_ERR, "stat: %s: %m", tf->name);
+        logw(logh, LOG_ERR, "stat: %s: %m", tf->name);
         return;
     }
 
-    syslog(LOG_DEBUG, "tail pos: %d size: %d", tf->pos, st.st_size);
+    logw(logh, LOG_DEBUG, "tail pos: %ld size: %ld", tf->pos, st.st_size);
 
     if (st.st_size == 0) {
-        syslog(LOG_WARNING, "File reset: %s", tf->name);
+        logw(logh, LOG_WARNING, "File reset: %s", tf->name);
         tf->pos = 0;
         return;
     }
     if (st.st_size < tf->pos) {
-        syslog(LOG_WARNING, "File shrunk, will reset: %s", tf->name);
+        logw(logh, LOG_WARNING, "File shrunk, will reset: %s", tf->name);
         tf->pos = 0;
     }
     if (st.st_size == tf->pos) {
-        syslog(LOG_DEBUG, "Size didn't change: %s", tf->name);
+        logw(logh, LOG_DEBUG, "Size didn't change: %s", tf->name);
         return;
     }
 
     fd = open(tf->name, O_RDONLY|O_CLOEXEC);
     if (fd == -1) {
-        syslog(LOG_ERR, "open: %s: %m", tf->name);
+        logw(logh, LOG_ERR, "open: %s: %m", tf->name);
         return;
     }
 
 #ifdef USE_MMAP
-    syslog(LOG_DEBUG, "using mmap");
+    logw(logh, LOG_DEBUG, "using mmap");
 
     ssize_t len = st.st_size - tf->pos;
     off_t tf_off = tf->pos % sysconf(_SC_PAGE_SIZE);
     char *addr = mmap(NULL, len + tf_off, PROT_READ, MAP_SHARED, fd, tf->pos - tf_off);
     if (addr == MAP_FAILED) {
-        syslog(LOG_ERR, "mmap: %m");
+        logw(logh, LOG_ERR, "mmap: %m");
         close(fd);
         return;
     }
@@ -258,7 +279,7 @@ void tail_lines(tfile *tf, void (*callback)(tfile *, char *)) {
 
         if (*(addr + tf_off + pos) == '\n') {
             char *line = strndup(addr + tf_off, pos);
-            syslog(LOG_DEBUG, line);
+            logw(logh, LOG_DEBUG, line);
             (*callback)(tf, line);
             free(line);
         }
@@ -287,7 +308,7 @@ void tail_lines(tfile *tf, void (*callback)(tfile *, char *)) {
         }
         sz++;
         if (c == '\n') {
-            syslog(LOG_DEBUG, "found newline at pos=%d sz=%d", tf->pos, sz);
+            logw(logh, LOG_DEBUG, "found newline at pos=%ld sz=%ld", tf->pos, sz);
             if (-1 == lseek(fd, tf->pos, SEEK_SET)) {
                 perror("lseek");
                 close(fd);
@@ -306,7 +327,7 @@ void tail_lines(tfile *tf, void (*callback)(tfile *, char *)) {
                 return;
             }
             line[sz-1] = 0;
-            syslog(LOG_DEBUG, line);
+            logw(logh, LOG_DEBUG, "%s", line);
             (*callback)(tf, line);
             free(line);
             tf->pos += sz;
@@ -317,11 +338,11 @@ void tail_lines(tfile *tf, void (*callback)(tfile *, char *)) {
 #endif
 
     close(fd);
-    syslog(LOG_DEBUG, "new tail pos: %d size: %d", tf->pos, st.st_size);
+    logw(logh, LOG_DEBUG, "new tail pos: %ld size: %ld", tf->pos, st.st_size);
 }
 
 void prog_exit(int sig) {
-    syslog(LOG_NOTICE, "Received signal %d, exiting", sig);
+    logw(logh, LOG_NOTICE, "Received signal %d, exiting", sig);
     exit_flag = 1;
 }
 
@@ -367,7 +388,7 @@ int main(int argc, char **argv) {
 
     // pcre vars
     pcre_tables = (unsigned char *)pcre_maketables();
-    printf("pcre_tables: %p\n", pcre_tables);
+    // printf("pcre_tables: %p\n", pcre_tables);
     const char *error_msg;
     int error_off;
 
@@ -377,6 +398,8 @@ int main(int argc, char **argv) {
     // Initialize global inotify fd and poll structure
     pollwatch.fd = inotify_init();
     pollwatch.events = POLLIN;
+    
+    // TODO: sd_journal_open() then sd_journal_get_events() to get logs from journald and put it in pollwatch
 
     if (pollwatch.fd == -1) {
         logw(logh, LOG_ERR, "Error in inotify_init(): %s", strerror(errno));
@@ -394,26 +417,27 @@ int main(int argc, char **argv) {
         if (-1 == stat(tf->name, &st)) {
             // file to monitor doesn't exist
             timeout = LOG_CREATE_SCAN_INTERVAL;
-            syslog(LOG_DEBUG, "%s doesn't exist, new timeout: %d", tf->name, timeout);
+            logw(logh, LOG_DEBUG, "%s doesn't exist, new timeout: %d", tf->name, timeout);
             tf->pos = 0;
         } else {
             tf_cnt_exist++;
             tf->pos = st.st_size;
-            syslog(LOG_DEBUG, "%s position: %u", tf->name, tf->pos);
+            logw(logh, LOG_DEBUG, "%s position: %lu", tf->name, tf->pos);
         }
 
         // for (int i = 0; tf->re[i].str; i++) printf("    re: %p %s\n", tf->re[i], tf->re[i].str);
     }
 
     char inotify_buf[ 100 * (sizeof(struct inotify_event) + NAME_MAX + 1)];
+    // exit_flag =1 ;
     while (!exit_flag) {
-        syslog(LOG_DEBUG, "Monitors: %u/%u sleeping %d milliseconds", tf_cnt_exist, tf_cnt_total, timeout);
+        logw(logh, LOG_DEBUG, "Monitors: %u/%u sleeping %d milliseconds", tf_cnt_exist, tf_cnt_total, timeout);
         int pollret = poll(&pollwatch, 1, timeout);
 
         // error
         if (pollret < 0) {
             if (errno == EINTR || errno == EAGAIN) {
-                syslog(LOG_DEBUG, "poll interrupted by signal");
+                logw(logh, LOG_DEBUG, "poll interrupted by signal");
                 if (!exit_flag) {
                     timeout = reset_check();
                     if (tf_cnt_exist < tf_cnt_total && LOG_CREATE_SCAN_INTERVAL < timeout)
@@ -421,7 +445,7 @@ int main(int argc, char **argv) {
                 }
                 continue;
             } else {
-                syslog(LOG_ERR, "poll: %m");
+                logw(logh, LOG_ERR, "poll: %m");
                 exit(1);
             }
         }
@@ -435,10 +459,10 @@ int main(int argc, char **argv) {
                     if (tf->watchfd == -1) {
                         tf->watchfd = inotify_add_watch(pollwatch.fd, tf->name, IN_MODIFY|IN_IGNORED);
                         if (tf->watchfd == -1) {
-                            syslog(LOG_DEBUG, "%s not monitored: %m", tf->name);
+                            logw(logh, LOG_DEBUG, "%s not monitored: %m", tf->name);
                         } else {
                             tf_cnt_exist++;
-                            syslog(LOG_DEBUG, "%s monitoring from now", tf->name);
+                            logw(logh, LOG_DEBUG, "%s monitoring from now", tf->name);
                             tf->pos = 0;
                             tail_lines(tf, proc_line);
                         }
@@ -456,13 +480,13 @@ int main(int argc, char **argv) {
             if (errno == EINTR || errno == EAGAIN) {
                 continue;
             } else {
-                syslog(LOG_ERR, "Error reading inotify event: %m");
+                logw(logh, LOG_ERR, "Error reading inotify event: %m");
                 exit(1);
             }
         }
         for (int e = 0; e < len; ) {
             struct inotify_event *ev = (struct inotify_event *) &inotify_buf[e];
-            syslog(LOG_DEBUG, "Inotify event pos %d/%d: %#08x", e, len, ev->mask);
+            logw(logh, LOG_DEBUG, "Inotify event pos %d/%ld: %#08x", e, len, ev->mask);
 
             // find out which monitored file received the event
             tfile *tf;
@@ -470,14 +494,14 @@ int main(int argc, char **argv) {
                 if (tf->watchfd == ev->wd)
                     break;
             assert(tf->name != NULL);
-            syslog(LOG_DEBUG, "%s got event", tf->name);
+            logw(logh, LOG_DEBUG, "%s got event", tf->name);
 
             if (ev->mask & IN_MODIFY) {
                 tail_lines(tf, proc_line);
                 // timeout = reset_check();
             }
             if (ev->mask & IN_IGNORED) {
-                syslog(LOG_DEBUG, "%s deleted", tf->name);
+                logw(logh, LOG_DEBUG, "%s deleted", tf->name);
                 tf->watchfd = -1;
                 tf_cnt_exist--;
                 if (timeout < 0)
