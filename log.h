@@ -7,11 +7,15 @@
 // default log facility:
 #define LOG_FACILITY LOG_DAEMON
 
-// logtype:
-#define LOG_TO_FILE 0
-#define LOG_TO_STDOUT 1
-#define LOG_TO_STDERR 2
-#define LOG_TO_SYSLOG 3
+// log destinations:
+#define LOG_TO_SYSLOG 0
+#define LOG_TO_FILE   1
+#define LOG_TO_STDOUT 2
+#define LOG_TO_STDERR 3
+
+static char *log_destinations[] = {
+    "syslog", "file", "stdout", "stderr"
+};
 
 /* loglevels are the ones defined by syslog:
  *       LOG_EMERG      system is unusable
@@ -24,22 +28,33 @@
  *       LOG_DEBUG      debug-level message
  */
 
+// TODO: use this from syslog.h directly?
+static char *log_levels[] = {
+    "emergency", "alert", "critical", "error", "warning", "notice", "info", "debug"
+};
+
 typedef struct {
     int level;
-    int type;
+    int dst;
     char *prefix; // used with strftime
     FILE *fh;
 } log_h;
 
-log_h *log_open(int logtype, int loglevel, char *prefix, char *file);
+log_h *log_open(int dst, int level, char *prefix, char *file);
 #define logw log_write
 void log_write(log_h *logh, int level, const char *fmt, ...);
 void log_close(log_h *logh);
 
-// returns logtype from string
-int logtype_str(char *logtype, int fallback);
+// returns dst as int
+int logdst_int(char *dst, int fallback);
 
-// returns loglevel from string
-int loglevel_str(char *loglevel, int fallback);
+// returns dst as string
+char *logdst_str(int dst);
+
+// returns loglevel as int
+int loglevel_int(char *level, int fallback);
+
+// returns loglevel as string
+char *loglevel_str(int level);
 
 #endif

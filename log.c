@@ -7,30 +7,33 @@
 
 #include "log.h"
 
-log_h *log_open(int logtype, int loglevel, char *prefix, char *file) {
+log_h *log_open(int dst, int loglevel, char *prefix, char *file) {
     log_h *logh;
 
     logh = malloc(sizeof(log_h));
     logh->level = loglevel;
-    logh->type = logtype;
+    logh->dst = dst;
     if (prefix != NULL)
         logh->prefix = strdup(prefix);
     else
         logh->prefix = NULL;
 
-    if (logtype == LOG_TO_FILE) {
+    if (dst == LOG_TO_FILE) {
         printf("logging to file: %s\n", file);
         logh->fh = fopen(file, "a");
         if (logh->fh == NULL) {
             fprintf(stderr, "Error opening %s: %s\n", file, strerror(errno));
             logh->fh = fdopen(2, "a"); // log to STDERR instead
         }
-    } else if (logtype == LOG_TO_SYSLOG) {
+    } else if (dst == LOG_TO_SYSLOG) {
         puts("logging to syslog");
         openlog(NULL, 0, LOG_DAEMON);
-    } else { // stdout or stderr
-        printf("logging to FD %d\n", logtype);
-        logh->fh = fdopen(logtype, "a");
+    } else if (dst == LOG_TO_STDOUT) { // stdout
+        puts("logging to stdout");
+        logh->fh = fdopen(1, "a");
+    } else { // stderr (fallback option)
+        puts("logging to stderr");
+        logh->fh = fdopen(2, "a");
     }
     return logh;
 }
@@ -39,7 +42,7 @@ void log_write(log_h *logh, int level, const char *fmt, ...) {
     va_list ap;
 
     va_start(ap, fmt);
-    if (logh->type == LOG_TO_SYSLOG) {
+    if (logh->dst == LOG_TO_SYSLOG) {
         vsyslog(LOG_FACILITY | level, fmt, ap);
     } else {
         // log to a file-handle: a file, stdout, or stderr obtained through fdopen()
@@ -61,7 +64,7 @@ void log_write(log_h *logh, int level, const char *fmt, ...) {
 }
 
 void log_close(log_h *logh) {
-    if (logh->type == LOG_TO_SYSLOG) {
+    if (logh->dst == LOG_TO_SYSLOG) {
         closelog();
     } else {
         fclose(logh->fh);
@@ -71,38 +74,46 @@ void log_close(log_h *logh) {
     free(logh);
 }
 
-int logtype_str(char *logtype, int fallback) {
-    if (logtype == NULL)
+int logdst_int(char *dst, int fallback) {
+    if (dst == NULL)
         return fallback;
-    if (!strcmp(logtype, "syslog")) {
+    if (!strcmp(dst, "syslog")) {
         return LOG_TO_SYSLOG;
-    } else     if (!strcmp(logtype, "file")) {
+    } else     if (!strcmp(dst, "file")) {
         return LOG_TO_FILE;
-    } else     if (!strcmp(logtype, "stdout")) {
+    } else     if (!strcmp(dst, "stdout")) {
         return LOG_TO_STDOUT;
-    } else     if (!strcmp(logtype, "stderr")) {
+    } else     if (!strcmp(dst, "stderr")) {
         return LOG_TO_STDERR;
     }
     return fallback;
 }
 
-int loglevel_str(char *logtype, int fallback) {
-    if (!strcmp(logtype, "emerg")) {
+char *logdst_str(int dst) {
+    return log_destinations[dst];
+}
+
+int loglevel_int(char *level, int fallback) {
+    if (!strcmp(level, "emerg")) {
         return LOG_EMERG;
-    } else     if (!strcmp(logtype, "alert")) {
+    } else     if (!strcmp(level, "alert")) {
         return LOG_ALERT;
-    } else     if (!strcmp(logtype, "crit") || !strcmp(logtype, "critical")) {
+    } else     if (!strcmp(level, "crit") || !strcmp(level, "critical")) {
         return LOG_CRIT;
-    } else     if (!strcmp(logtype, "err") || !strcmp(logtype, "error")) {
+    } else     if (!strcmp(level, "err") || !strcmp(level, "error")) {
         return LOG_ERR;
-    } else     if (!strcmp(logtype, "warn") || !strcmp(logtype, "warning")) {
+    } else     if (!strcmp(level, "warn") || !strcmp(level, "warning")) {
         return LOG_WARNING;
-    } else     if (!strcmp(logtype, "notice")) {
+    } else     if (!strcmp(level, "notice")) {
         return LOG_NOTICE;
-    } else     if (!strcmp(logtype, "info")) {
+    } else     if (!strcmp(level, "info")) {
         return LOG_INFO;
-    } else     if (!strcmp(logtype, "debug")) {
+    } else     if (!strcmp(level, "debug")) {
         return LOG_DEBUG;
     }
     return fallback;
+}
+
+char *loglevel_str(int level) {
+    return log_levels[level];
 }

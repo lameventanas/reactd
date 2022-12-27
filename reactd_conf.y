@@ -49,19 +49,23 @@ tglobal_cfg cfg;
 
 %define parse.error verbose
 
-%token VERSIONKEY
-%token OPTIONSKEY
-%token PIDFILEKEY
-%token LOGGINGKEY
-%token LOGFILEKEY
-%token LOGPREFIXKEY
-%token LOGLEVELKEY
-%token COMMANDKEY
-%token TIMEOUTKEY
-%token KEYKEY
-%token TRIGGERKEY
-%token RESETKEY
-%token INKEY
+%token VERSION_KEY
+%token OPTIONS_KEY
+%token PIDFILE_KEY
+%token LOGGING_KEY
+%token LOGFILE_KEY
+%token LOGPREFIX_KEY
+%token LOGLEVEL_KEY
+%token STDERR_KEY
+%token STDOUT_KEY
+%token FILE_KEY
+%token SYSLOG_KEY
+%token COMMAND_KEY
+%token TIMEOUT_KEY
+%token KEY_KEY
+%token TRIGGER_KEY
+%token RESET_KEY
+%token IN_KEY
 %token DOT
 
 %union {
@@ -74,6 +78,8 @@ tglobal_cfg cfg;
 %token <ival> INT
 %token <fval> FLOAT
 %token <sval> STRING
+%token <ival> LOGLEVEL
+%token <ival> LOGDST
 
 %%
 
@@ -86,11 +92,11 @@ header:
     ;
 
 version:
-    VERSIONKEY INT DOT INT { cfg.version_major = $2; cfg.version_minor = $2; }
+    VERSION_KEY INT DOT INT { cfg.version_major = $2; cfg.version_minor = $2; }
     ;
 
 options:
-    OPTIONSKEY '{' option_lines '}'
+    OPTIONS_KEY '{' option_lines '}'
     ;
 
 option_lines:
@@ -99,11 +105,11 @@ option_lines:
     ;
 
 option_line:
-    PIDFILEKEY '=' STRING       { cfg.pidfile = $3; }
-    | LOGGINGKEY '=' STRING     { cfg.logging = $3; }
-    | LOGFILEKEY '=' STRING     { cfg.logfile = $3; }
-    | LOGPREFIXKEY '=' STRING   { cfg.logprefix = $3; }
-    | LOGLEVELKEY '=' STRING    { cfg.loglevel = $3; }
+    PIDFILE_KEY '=' STRING        { cfg.pidfile   = $3; }
+    | LOGGING_KEY '=' LOGDST      { cfg.logdst    = $3; }
+    | LOGFILE_KEY '=' STRING      { cfg.logfile   = $3; }
+    | LOGPREFIX_KEY '=' STRING    { cfg.logprefix = $3; }
+    | LOGLEVEL_KEY '=' LOGLEVEL   { cfg.loglevel  = $3; }
     ;
 
 body:
@@ -180,23 +186,23 @@ re_options:
     ;
 
 re_option:
-    COMMANDKEY '=' STRING    {
+    COMMAND_KEY '=' STRING    {
                     // dprint("re command: '%s'", $3);
                     file_cfg->re[file_cfg->re_cnt].cmd = $3;
                     printf("assigned command %p\n", $3);
                 }
-    | KEYKEY '=' STRING    {
+    | KEY_KEY '=' STRING    {
                     // dprint("threshold key: '%s'", $3);
                     file_cfg->re[file_cfg->re_cnt].key = $3;
                     printf("assigned key %p\n", $3);
                 }
-    | TRIGGERKEY '=' INT INKEY TIMEPERIOD    {
+    | TRIGGER_KEY '=' INT IN_KEY TIMEPERIOD    {
                     // dprint("threshold count: %d", $3);
                     // dprint("threshold period: %d", $5);
                     file_cfg->re[file_cfg->re_cnt].trigger_cnt = $3;
                     file_cfg->re[file_cfg->re_cnt].trigger_time = $5;
                 }
-    | RESETKEY
+    | RESET_KEY
     '{'    {
             dprint("starting reset section");
         }
@@ -212,11 +218,11 @@ reset_options:
     ;
 
 reset_option:
-    TIMEOUTKEY '=' TIMEPERIOD    {
+    TIMEOUT_KEY '=' TIMEPERIOD    {
                     dprint("reset timeout: %d", $3);
                     file_cfg->re[file_cfg->re_cnt].reset_time = $3;
                 }
-    | COMMANDKEY '=' STRING    {
+    | COMMAND_KEY '=' STRING    {
                     dprint("reset command: '%s'", $3);
                     file_cfg->re[file_cfg->re_cnt].reset_cmd = $3;
                     printf("assigned reset_cmd %p\n", $3);

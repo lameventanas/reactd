@@ -105,14 +105,10 @@ void free_keyhits(void *kh, void *param) {
 void free_config() {
     if (cfg.pidfile)
         free(cfg.pidfile);
-    if (cfg.logging)
-        free(cfg.logging);
     if (cfg.logfile)
         free(cfg.logfile);
     if (cfg.logprefix)
         free(cfg.logprefix);
-    if (cfg.loglevel)
-        free(cfg.loglevel);
 
     for (tfile *tf = tfs; tf->name; tf++) {
         printf("freeing TF %s %p\n", tf->name, tf->name);
@@ -347,6 +343,7 @@ void prog_exit(int sig) {
 }
 
 int main(int argc, char **argv) {
+    dprint_init();
     char *config = DEFAULT_CONFIG;
     int ch;
 
@@ -379,7 +376,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    logh = log_open(logtype_str(cfg.logging, LOG_TO_SYSLOG), loglevel_str(cfg.loglevel, LOG_INFO), cfg.logprefix, cfg.logfile);
+    logh = log_open(cfg.logdst, cfg.loglevel, cfg.logprefix, cfg.logfile);
     signal(SIGCHLD, SIG_IGN);
     signal(SIGINT, prog_exit);
     signal(SIGTERM, prog_exit);
@@ -392,8 +389,7 @@ int main(int argc, char **argv) {
     const char *error_msg;
     int error_off;
 
-    dprint_init();
-    dprint("Global options:\nversion: %u.%u\npidfile: %s\nlogging: %s\nloglevel: %s\n", cfg.version_major, cfg.version_minor, cfg.pidfile, cfg.logging, cfg.loglevel);
+    dprint("Global options:\nversion: %u.%u\npidfile: %s\nlogging: %s\nloglevel: %s\n", cfg.version_major, cfg.version_minor, cfg.pidfile, logdst_str(cfg.logdst), loglevel_str(cfg.loglevel));
 
     // Initialize global inotify fd and poll structure
     pollwatch.fd = inotify_init();

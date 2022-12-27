@@ -69,9 +69,9 @@ typedef struct {
     unsigned int version_major;
     unsigned int version_minor;
     char *pidfile;
-    char *logging;
+    int logdst;
     char *logfile;
-    char *loglevel;
+    int loglevel;
     char *logprefix;
 } tglobal_cfg;
 

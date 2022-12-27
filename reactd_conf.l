@@ -13,19 +13,30 @@ int linenr = 1;
 %%
 [ \t]+     ; // ignore spaces
 \n         { ++linenr; } // count lines
-@version   { return VERSIONKEY; }
-@options   { return OPTIONSKEY; }
-pidfile    { return PIDFILEKEY; }
-logging    { return LOGGINGKEY; }
-logfile    { return LOGFILEKEY; }
-logprefix  { return LOGPREFIXKEY; }
-loglevel   { return LOGLEVELKEY; }
-command    { return COMMANDKEY; }
-key        { return KEYKEY; }
-trigger    { return TRIGGERKEY; }
-reset      { return RESETKEY; }
-timeout    { return TIMEOUTKEY; }
-in         { return INKEY; }
+@version   { return VERSION_KEY;   }
+@options   { return OPTIONS_KEY;   }
+pidfile    { return PIDFILE_KEY;   }
+logging    { return LOGGING_KEY;   }
+logfile    { return LOGFILE_KEY;   }
+logprefix  { return LOGPREFIX_KEY; }
+loglevel   { return LOGLEVEL_KEY;  }
+
+(syslog|file|stdout|stderr) {
+    yylval.ival = logdst_int(yytext, LOG_TO_SYSLOG);
+    return LOGDST;
+}
+
+(emergency|alert|critical|error|warning|notice|info|debug) {
+    yylval.ival = loglevel_int(yytext, 0);
+    return LOGLEVEL;
+}
+
+command    { return COMMAND_KEY; }
+key        { return KEY_KEY;     }
+trigger    { return TRIGGER_KEY; }
+reset      { return RESET_KEY;   }
+timeout    { return TIMEOUT_KEY; }
+in         { return IN_KEY;      }
 [0-9]+[ \t]+(second|minute|hour|day)s?    {
     int num;
     char unit[7];
