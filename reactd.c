@@ -48,7 +48,7 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 }
 
 
-int run_prog(char *prog) {
+int run_prog(char **argv) {
     pid_t pid = fork();
     if (pid == 0) {
         // if (daemon(0, 0) < 0) {
@@ -56,10 +56,10 @@ int run_prog(char *prog) {
             logw(logh, LOG_ERR, "daemon: %m");
             exit(1);
         }
-        printf("Running %s\n", prog);
-        execl(prog, prog, NULL);
+        printf("Running %s\n", argv[0]);
+        execv(argv[0], argv);
         printf("Could not run %s: %s\n", strerror(errno));
-        logw(logh, LOG_ERR, "Could not run %s: %m", prog);
+        logw(logh, LOG_ERR, "Could not run %s: %m", argv[0]);
         exit(1);
     }
     if (pid < 0) {
@@ -70,12 +70,15 @@ int run_prog(char *prog) {
 }
 
 // run reset for a specific /*key*/
-void reset_run(char *key, char *cmd) {
-    logw(logh, LOG_DEBUG, "Resetting item with key %s with cmd %s", key, cmd);
+void reset_run(char *key, char **argv) {
+    logw(logh, LOG_DEBUG, "Resetting item with key %s", key);
     setenv("REACT_KEY", key, 1);
-    run_prog(cmd);
+    run_prog(argv);
     unsetenv("REACT_KEY");
     free(key);
+    for (unsigned int i = 0; argv[i]; i++)
+        free(argv[i]);
+    free(argv);
 }
 
 // check if any items must be reset
@@ -83,7 +86,7 @@ void reset_run(char *key, char *cmd) {
 int reset_check() {
     logw(logh, LOG_DEBUG, "reset_check");
     time_t t = time(NULL);
-    reset_list_run(reset_list, t, reset_run);
+    reset_list_run(reset_list, t, (void (*)(char *, void *))reset_run);
     time_t ret = reset_list_next_reset(reset_list);
     logw(logh, LOG_DEBUG, "next_reset: %ld", ret);
     return ret < 0 ? ret : 1000 * (ret - t) + RESET_GUARD_TIME;
@@ -111,17 +114,43 @@ void free_config() {
         free(cfg.logprefix);
 
     for (tfile *tf = tfs; tf->name; tf++) {
-        printf("freeing TF %s %p\n", tf->name, tf->name);
+        dprint("freeing TF %s %p\n", tf->name, tf->name);
         free(tf->name);
         for (re *re = tf->re; re->str; re++) {
-            printf("    freeing RE %s %p\n", re->str, re->str);
+            dprint("    freeing RE %s %p\n", re->str, re->str);
             free(re->str);
             if (re->re)
                 pcre_free(re->re);
-            if (re->cmd)
+            if (re->cmd) {
+                dprint("freeing cmd");
+                for (unsigned int i = 0; i < re->cmd->len; i++) {
+#ifdef DEBUG
+                    {
+                        char *tmp = pcre_subst_str(re->cmd->args[i]);
+                        dprint("freeing cmd arg %u: %s", i, tmp);
+                        free(tmp);
+                    }
+#endif
+                    pcre_subst_free(re->cmd->args[i]);
+                }
+                free(re->cmd->args);
                 free(re->cmd);
-            if (re->reset_cmd)
+            }
+            if (re->reset_cmd) {
+                dprint("freeing reset_cmd");
+                for (unsigned int i = 0; i < re->reset_cmd->len; i++) {
+#ifdef DEBUG
+                    {
+                        char *tmp = pcre_subst_str(re->reset_cmd->args[i]);
+                        dprint("freeing reset_cmd arg %u: %s", i, tmp);
+                        free(tmp);
+                    }
+#endif
+                    pcre_subst_free(re->reset_cmd->args[i]);
+                }
+                free(re->reset_cmd->args);
                 free(re->reset_cmd);
+            }
             if (re->re_studied)
                 pcre_free_study(re->re_studied);
             if (re->key)
@@ -166,7 +195,7 @@ void proc_line(tfile *tf, char *s) {
                 if (!hits) {
                     logw(logh, LOG_DEBUG, "creating hit list for %s", key);
                     hits = malloc(sizeof(keyhits));
-                    hits->key = key;
+                    hits->key = strdup(key);
                     hits->hits = ring_init(re->trigger_cnt);
                     avl_insert(re->hitlist, hits);
                 }
@@ -190,13 +219,28 @@ void proc_line(tfile *tf, char *s) {
                             setenv(k, v, 1);
                             free(v);
                         }
-                        logw(logh, LOG_INFO, "Running %s for %s", re->cmd, key);
-                        if (run_prog(re->cmd)) {
+
+                        // build argv for execv()
+                        char **argv = (char **)malloc((re->cmd->len + 1) * sizeof(char *));
+                        assert(argv != NULL);
+                        for (unsigned int i = 0; i < re->cmd->len; i++)
+                            argv[i] = pcre_subst_replace(s, re->cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
+                        argv[re->cmd->len] = NULL; // null-terminate for execv()
+
+                        logw(logh, LOG_INFO, "Running %s for %s", argv[0], key);
+                        if (run_prog(argv)) {
                             // TODO: add to unban fifo
                             logw(logh, LOG_DEBUG, "Banned key %s for %u seconds", key, re->reset_time);
                             if (re->reset_cmd != NULL && re->reset_time > 0) {
-                                // NOTE: reset_list_run callback should free key but not reset_cmd
-                                reset_list_add(reset_list, *hit_time + re->reset_time, strdup(key), re->reset_cmd);
+                                // build argv for execv()
+                                char **reset_argv = (char **)malloc((re->reset_cmd->len + 1) * sizeof(char *));
+                                assert(reset_argv != NULL);
+                                for (unsigned int i = 0; i < re->cmd->len; i++)
+                                    reset_argv[i] = pcre_subst_replace(s, re->reset_cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
+                                reset_argv[re->reset_cmd->len] = NULL; // null-terminate for execv()
+
+                                // NOTE: reset_list_run callback should free key and reset_argv
+                                reset_list_add(reset_list, *hit_time + re->reset_time, strdup(key), reset_argv);
                                 if (timeout < 0 || timeout > 1000 * re->reset_time + RESET_GUARD_TIME) {
                                     logw(logh, LOG_DEBUG, "Setting timeout to %u", re->reset_time);
                                     timeout = 1000 * re->reset_time + RESET_GUARD_TIME;
@@ -204,6 +248,9 @@ void proc_line(tfile *tf, char *s) {
                                 logw(logh, LOG_DEBUG, "After ban timeout = %u", timeout);
                             }
                         }
+                        for (unsigned int i = 0; i < re->cmd->len; i++)
+                            free(argv[i]);
+                        free(argv);
                         unsetenv("REACT_FILE");
                         unsetenv("REACT_KEY");
                         for (unsigned int i = 0; i < match_cnt; i++) {
@@ -507,11 +554,12 @@ int main(int argc, char **argv) {
         }
     }
 
+    dprint("freeing memory");
     reset_list_free(reset_list, reset_item_free);
 
     log_close(logh);
     free_config();
-    printf("freeing tables: %p\n", pcre_tables);
+    dprint("freeing tables: %p\n", pcre_tables);
     if (pcre_tables)
         pcre_free((void *)pcre_tables);
 

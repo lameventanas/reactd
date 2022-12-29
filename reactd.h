@@ -41,9 +41,14 @@
 #define RESET_GUARD_TIME 250 // in milliseconds
 
 typedef struct {
+    pcre_subst **args; // pcre_subst template for cmd and arguments (0=cmd)
+    unsigned int len;  // number of template strings in args
+} tcmd;
+
+typedef struct {
     char *str;
-    char *cmd;
-    char *reset_cmd;
+    tcmd *cmd;
+    tcmd *reset_cmd;
     unsigned int trigger_time; // in seconds
     unsigned int reset_time;
     pcre *re;

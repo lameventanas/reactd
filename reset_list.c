@@ -17,11 +17,11 @@ treset_list *reset_list_init() {
     return list;
 }
 
-void reset_list_free(treset_list *list,  void (*callback)(time_t t, char *key, char *cmd)) {
+void reset_list_free(treset_list *list,  void (*callback)(time_t t, char *key, void *arg)) {
     treset_item *item = list->items;
     while (item) {
         if (callback)
-            (callback)(item->t, item->key, item->cmd);
+            (callback)(item->t, item->key, item->arg);
         treset_item *tmp = item;
         item = item->next;
         free(tmp);
@@ -29,13 +29,13 @@ void reset_list_free(treset_list *list,  void (*callback)(time_t t, char *key, c
     free(list);
 }
 
-void reset_list_add(treset_list *list, time_t t, char *key, char *cmd) {
+void reset_list_add(treset_list *list, time_t t, char *key, void *arg) {
     // if (t < list->next_reset)
         //list->next_reset = t;
     treset_item *item = malloc(sizeof(treset_item));
     item->t = t;
     item->key = key;
-    item->cmd = cmd;
+    item->arg = arg;
     item->next = NULL;
 
     dprintf("reset_list_add\n");
@@ -62,9 +62,9 @@ void reset_list_add(treset_list *list, time_t t, char *key, char *cmd) {
     }
 }
 
-void reset_list_run(treset_list *list, time_t t, void (*callback)(char *key, char *cmd)) {
+void reset_list_run(treset_list *list, time_t t, void (*callback)(char *key, void *arg)) {
     while (list->items != NULL && t >= list->items->t) {
-        callback(list->items->key, list->items->cmd);
+        callback(list->items->key, list->items->arg);
         treset_item *tmp = list->items;
         list->items = list->items->next;
         free(tmp);

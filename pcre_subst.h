@@ -1,7 +1,7 @@
 #ifndef PCRE_SUBST_H
 #define PCRE_SUBST_H
 
-// pcre_subst_study returns a null-terminated array of pcre_subst
+// pcre_subst_create returns a null-terminated array of pcre_subst
 #define PCRE_SUBST_END 0
 #define PCRE_SUBST_REPLACEMENT 1
 #define PCRE_SUBST_SUBJECT 2
@@ -15,7 +15,7 @@ typedef struct {
 // default: substitutes \\ \n \r \t \e \a \f in replacement substrings and does not quote subject substrings
 #define PCRE_SUBST_DEFAULT 0
 
-// do not substitute \\ \n \r \t \e \a \f in replacement substrings (applies to study function only)
+// do not substitute \\ \n \r \t \e \a \f in replacement substrings (applies to create function only)
 #define PCRE_SUBST_NO_SPECIAL_CHARS 1
 
 // single-quote subject substrings, and escape any found single-quotes in them (applies to replace function only)
@@ -31,16 +31,24 @@ pcre_subst *pcre_subst_create(char *s, int options);
 /*
  * Replaces matches returned by pcre_exec() into pcre_subst structure, returning a string
  * subject: the string matched with pcre_exec
- * subst: structure as returned by pcre_subst_study
+ * tpl: template as returned by pcre_subst_create
  * ovector: same as returned by pcre_exec()
  * ovecsize: same used with pcre_exec()
  * return: a new allocated string with the substitutions made, must be freed by caller
  */
-char *pcre_subst_replace(char *subject, pcre_subst *subst, int *ovector, int ovecsize, int matches, int options);
+char *pcre_subst_replace(char *subject, pcre_subst *tpl, int *ovector, int ovecsize, int matches, int options);
 
 /*
- * Free replacement data returned by pcre_subst_study()
+ * Free replacement data returned by pcre_subst_create()
  */
 void pcre_subst_free(pcre_subst *data);
+
+/*
+ * Return string representing template (inverse of pcre_subst_create)
+ * return: a new allocated string, must be freed by caller
+ */
+#ifdef DEBUG
+char *pcre_subst_str(pcre_subst *tpl);
+#endif
 
 #endif

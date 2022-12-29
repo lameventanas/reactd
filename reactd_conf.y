@@ -25,9 +25,9 @@ int yydebug = 1;
 // parse_config converts cfg_* structures to the ones the program uses
 typedef struct {
     char *str;
-    char *cmd;
     char *key;
-    char *reset_cmd;
+    tcmd *cmd;
+    tcmd *reset_cmd;
     unsigned int trigger_time; // in seconds
     unsigned int reset_time;
     unsigned int trigger_cnt;
@@ -41,18 +41,69 @@ typedef struct {
 } tfile_cfg;
 tfile_cfg *file_cfg = NULL; // current file section config being parsed
 
+tcmd *cmd = NULL; // current command being parsed
+
 // these are the only ones used by the rest of the program:
 tfile *tfs;
 tglobal_cfg cfg;
 
+
+// works in-place (returns s, possibly with different length)
+/*
+unescape like this:
+\\ -> \
+\" -> "
+\1 -> \1
+\n -> NEWLINE
+*/
+char *unescape(char *s) {
+    unsigned int i = 0;
+    unsigned int d = 0;
+    char escaping = 0;
+    while (s[i] != 0) {
+        switch (s[i]) {
+            case '\\':
+                if (escaping) {
+                    escaping = 0;
+                    s[d++] = s[i];
+                } else {
+                    escaping = 1;
+                }
+                break;
+            case '"': // consume previous escape character
+                if (escaping)
+                    escaping = 0;
+                s[d++] = s[i];
+                break;
+            case 'n':
+                if (escaping) {
+                    escaping = 0;
+                    s[d++] = '\n';
+                    break;
+                }
+                // no break here, let it continue to handle as normal "n" if there was no escape before
+            default: // don't consume previous escape character
+                if (escaping) {
+                    escaping = 0;
+                    s[d++] = '\\';
+                }
+                s[d++] = s[i];
+                break;
+        }
+        i++;
+    }
+    s[d] = 0;
+    return s;
+}
+
 %}
 
-%define parse.error verbose
+%define parse.error detailed
 
 %token VERSION_KEY
 %token OPTIONS_KEY
 %token PIDFILE_KEY
-%token LOGGING_KEY
+%token LOGDST_KEY
 %token LOGFILE_KEY
 %token LOGPREFIX_KEY
 %token LOGLEVEL_KEY
@@ -78,6 +129,7 @@ tglobal_cfg cfg;
 %token <ival> INT
 %token <fval> FLOAT
 %token <sval> STRING
+%token <sval> REGEX
 %token <ival> LOGLEVEL
 %token <ival> LOGDST
 
@@ -100,13 +152,13 @@ options:
     ;
 
 option_lines:
-    option_lines ',' option_line
+    option_lines option_line
     | option_line
     ;
 
 option_line:
     PIDFILE_KEY '=' STRING        { cfg.pidfile   = $3; }
-    | LOGGING_KEY '=' LOGDST      { cfg.logdst    = $3; }
+    | LOGDST_KEY '=' LOGDST       { cfg.logdst    = $3; }
     | LOGFILE_KEY '=' STRING      { cfg.logfile   = $3; }
     | LOGPREFIX_KEY '=' STRING    { cfg.logprefix = $3; }
     | LOGLEVEL_KEY '=' LOGLEVEL   { cfg.loglevel  = $3; }
@@ -157,7 +209,8 @@ re_entries:
     ;
 
 re_entry:
-    STRING    {
+    REGEX    {
+            unescape($1);
             dprint("starting re section: '%s'", $1);
             file_cfg->re = realloc(file_cfg->re, sizeof(re_cfg) * (file_cfg->re_cnt + 1));
             printf("realloc of %p -> %p\n", file_cfg->re);
@@ -181,18 +234,20 @@ re_entry:
     ;
 
 re_options:
-    re_options ',' re_option
+    re_options re_option
     | re_option
     ;
 
 re_option:
-    COMMAND_KEY '=' STRING    {
-                    // dprint("re command: '%s'", $3);
-                    file_cfg->re[file_cfg->re_cnt].cmd = $3;
-                    printf("assigned command %p\n", $3);
-                }
+    COMMAND_KEY '=' command {
+        dprint("re command: assigning previously parsed command %s with %d arguments", cmd->args[0], cmd->len);
+        file_cfg->re[file_cfg->re_cnt].cmd = cmd;
+        cmd = NULL;
+    }
     | KEY_KEY '=' STRING    {
                     // dprint("threshold key: '%s'", $3);
+                    unescape($3);
+                    dprint("re key: ->%s<-", $3);
                     file_cfg->re[file_cfg->re_cnt].key = $3;
                     printf("assigned key %p\n", $3);
                 }
@@ -212,8 +267,40 @@ re_option:
         }
     ;
 
+command:
+    command command_arg
+    | command_arg
+    ;
+;
+
+command_arg:
+    STRING  {
+        dprint("new arg: '%s'", $1);
+        if (cmd == NULL) {
+            dprint("new command");
+            cmd = (tcmd *)calloc(1, sizeof(tcmd));
+            assert(cmd != NULL);
+        }
+        cmd->args = (pcre_subst **)realloc(cmd->args, sizeof(pcre_subst *) * (cmd->len+1));
+        dprint("adding command argument, new list pointer: 0x%X", cmd->args);
+
+        unescape($1);
+        dprint("assigning arg ->%s<- in position %d", $1, cmd->len);
+        cmd->args[cmd->len] = pcre_subst_create($1, PCRE_SUBST_DEFAULT);
+#ifdef DEBUG
+        {
+            char *tmp = pcre_subst_str(cmd->args[cmd->len]);
+            dprint("created pcre_subst for arg ->%s<-", tmp);
+            free(tmp);
+        }
+#endif
+        free($1);
+        cmd->len += 1;
+    }
+;
+
 reset_options:
-    reset_options ',' reset_option
+    reset_options reset_option
     | reset_option
     ;
 
@@ -222,17 +309,17 @@ reset_option:
                     dprint("reset timeout: %d", $3);
                     file_cfg->re[file_cfg->re_cnt].reset_time = $3;
                 }
-    | COMMAND_KEY '=' STRING    {
-                    dprint("reset command: '%s'", $3);
-                    file_cfg->re[file_cfg->re_cnt].reset_cmd = $3;
-                    printf("assigned reset_cmd %p\n", $3);
-                }
+    | COMMAND_KEY '=' command {
+    dprint("reset command: assigning previously parsed command");
+        file_cfg->re[file_cfg->re_cnt].reset_cmd = cmd;
+        cmd = NULL;
+    }
     ;
 
 %%
 
 void yyerror(const char *s) {
-    printf("Error parsing line %d: %s\n", linenr, s);
+    printf("Parse error: %s\n", s);
 }
 
 // callback compare for avl tree
@@ -284,7 +371,7 @@ int parse_config(char *configfile) {
             tf->re = calloc(n->re_cnt + 1, sizeof(re)); // allocate space for all RE's plus last NULL
             for (unsigned int i = 0; i < n->re_cnt; i++) {
                 printf("re %d %p re: %s\n", i, &n->re[i], n->re[i].str);
-                printf("re %d cmd: %s\n", i, n->re[i].cmd);
+                printf("re %d cmd: %s\n", i, n->re[i].cmd->args[0]);
                 printf("re %d key: %s\n", i, n->re[i].key);
 
                 if (n->re[i].key == NULL) {
@@ -311,6 +398,13 @@ int parse_config(char *configfile) {
                 }
                 if (n->re[i].key != NULL) {
                     tf->re[i].key = pcre_subst_create(n->re[i].key, PCRE_SUBST_DEFAULT);
+#ifdef DEBUG
+                    {
+                        char *tmp = pcre_subst_str(tf->re[i].key);
+                        dprint("created pcre_subst for key: ->%s<-", tmp);
+                        free(tmp);
+                    }
+#endif
                     free(n->re[i].key);
                 }
                 tf->re[i].hitlist = avl_create(keyhits_cmp, NULL, NULL);

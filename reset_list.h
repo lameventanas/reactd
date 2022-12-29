@@ -7,7 +7,7 @@
 typedef struct _treset_item {
     time_t t;
     char *key;
-    char *cmd;
+    void *arg;
     struct _treset_item *next;
 } treset_item;
 
@@ -19,9 +19,9 @@ typedef struct {
 treset_list *reset_list_init();
 void reset_list_free();
 
-void reset_list_add(treset_list *list, time_t t, char *key, char *cmd);
+void reset_list_add(treset_list *list, time_t t, char *key, void *arg);
 
-void reset_list_run(treset_list *list, time_t t, void (*callback)(char *key, char *cmd));
+void reset_list_run(treset_list *list, time_t t, void (*callback)(char *key, void *arg));
 
 // -1 when there are no items, this indicates how long can poll sleep (eg: smallest t, t from first item)
 #define reset_list_next_reset(l) (l->items ? l->items->t : -1)

@@ -6,17 +6,16 @@
 #include "reactd_conf.tab.h"
 #include "log.h"
 
-int linenr = 1;
 ;
 %}
+%option noyywrap noinput nounput nounput
 
 %%
-[ \t]+     ; // ignore spaces
-\n         { ++linenr; } // count lines
+[ \t\n]+
 @version   { return VERSION_KEY;   }
 @options   { return OPTIONS_KEY;   }
 pidfile    { return PIDFILE_KEY;   }
-logging    { return LOGGING_KEY;   }
+logdst     { return LOGDST_KEY;   }
 logfile    { return LOGFILE_KEY;   }
 logprefix  { return LOGPREFIX_KEY; }
 loglevel   { return LOGLEVEL_KEY;  }
@@ -36,7 +35,7 @@ key        { return KEY_KEY;     }
 trigger    { return TRIGGER_KEY; }
 reset      { return RESET_KEY;   }
 timeout    { return TIMEOUT_KEY; }
-in         { return IN_KEY;      }
+" in "     { return IN_KEY;      }
 [0-9]+[ \t]+(second|minute|hour|day)s?    {
     int num;
     char unit[7];
@@ -55,18 +54,27 @@ in         { return IN_KEY;      }
 
 
 [0-9]+          { yylval.ival = atoi(yytext); return INT; }
-\".+\"          {
+
+\"([^\"]|\\\")*\"          { // not quote or quote preceded by escape
     // we have to copy because we can't rely on yytext not changing underneath us:
     yylval.sval = strndup(yytext+1, strlen(yytext)-2);
-    printf("strndup: %p %s\n", yylval.sval, yylval.sval);
+    // printf("strndup: %p %s\n", yylval.sval, yylval.sval);
     return STRING;
+}
+
+\/([^\/]|\\\/)+\/        {
+    // we have to copy because we can't rely on yytext not changing underneath us:
+    yylval.sval = strndup(yytext+1, strlen(yytext)-2);
+    // printf("strndup: %p %s\n", yylval.sval, yylval.sval);
+    return REGEX;
 }
 
 \. { return DOT; }
 
-
 [\{\},=]  { return yytext[0]; } // return single characters that are used in the config file
+
 #.*        ; // ignore comments
+
 
 <<EOF>> {
     printf("EOF of config file\n");
@@ -74,9 +82,11 @@ in         { return IN_KEY;      }
     yyterminate();
 }
 
+
 %%
 /*
 void yyerror(const char *s) {
     printf("Error parsing line %d: %s\n---\n%s\n---", linenr, s, yytext);
 }
 */
+

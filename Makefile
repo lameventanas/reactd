@@ -1,4 +1,6 @@
 CFLAGS = -pipe -ggdb
+FLEXFLAGS =
+BISONFLAGS =
 
 PROGS = reactd
 TESTS = test_reset_list test_ring test_hash test_btree
@@ -8,6 +10,8 @@ tests: $(TESTS)
 # all: reactd keylist_test threshold_test subst_test
 
 debug: CFLAGS += -DDEBUG -ggdb
+debug: FLEXFLAGS += --debug
+debug: BISONFLAGS += --debug
 debug: all
 	@true
 
@@ -21,7 +25,7 @@ LDFLAGS_pcre = $(shell pkg-config --libs $(PKGCONFIG_ARGS) libpcre)
 ifeq ($(DEBUG),)
   CFLAGS += -ggdb -O3 -std=gnu99
 else
-  CFLAGS += -ggdb -std=gnu99 -DDEBUG -DDEBUG_RESET_LIST -DDEBUG_RING -DDEBUG_HASH -DDEBUG_BTREE
+  CFLAGS += -ggdb -std=gnu99 -DDEBUG -DDEBUG_RESET_LIST -DDEBUG_RING -DDEBUG_HASH -DDEBUG_BTREE -DDEBUG_PCRE_SUBST
 endif
 
 objects_reactd = reactd_conf.tab.o reactd_conf.lex.yy.o reactd.o avl.o pcre_subst.o debug.o log.o ring.o reset_list.o
@@ -37,10 +41,10 @@ objects_ring_test = test_ring ring_test.o Test_ring.o ring.o Test_ring.c
 	$(CC) -c $(CFLAGS) $*.c -o $*.o
 
 reactd_conf.tab.c reactd_conf.tab.h: reactd_conf.y
-	bison -d reactd_conf.y
+	bison $(BISONFLAGS) -d reactd_conf.y
 
 reactd_conf.lex.yy.c: reactd_conf.l reactd_conf.tab.h
-	flex -o reactd_conf.lex.yy.c reactd_conf.l
+	flex $(FLEXFLAGS) -o reactd_conf.lex.yy.c reactd_conf.l
 
 reactd: $(objects_reactd)
 	$(CC) $(LDFLAGS) $(CFLAGS) $(objects_reactd) -lfl $(LDFLAGS_pcre) -lm -o reactd

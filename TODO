@@ -1,7 +1,11 @@
-- Add lexer keys for logging targets (eg: stderr, stdout), and log levels
-- Allow arguments to commands, replace capture groups in arguments/commands
-    command = "/home/alan/bin/scripts/my test.sh" "smtp" "\1"
+- free hits in hits in re->hitlist after trigger period, otherwise it will keep growing indefinitely
+- add env vars REACT_KEY REACT_FILE REACT_%u when running reset_cmd
+- allow running commands even when key or trigger is not specified
 - Create test unit for subst library
 - Improve dprint() to print times in human-readable form, if possible with milliseconds
-- follow advice in here: https://stanislaw.github.io/2016/04/02/flex-and-bison-tips-for-beginners.html
-- use reflex instead of flex/bison? https://www.genivia.com/doc/reflex/html/
+- explore using reflex instead of flex/bison? https://www.genivia.com/doc/reflex/html/
+- make reset_list more generic, rename to expire_list
+- add systemd journal functionality via sd_journal_open() and sd_journal_get_events() (optional at compile time)
+- add ipset() functionality directly (optional at compile time)
+- pcre_subst: by default don't replace \\ \n \r \t \e \a when creating template
+- pcre_subst: rename to pcre_tpl?
