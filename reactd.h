@@ -38,7 +38,7 @@
 #define EVENT_REACT_TIME 250000
 #define LOG_CREATE_SCAN_INTERVAL 2000 // in milliseconds
 // #define USE_MMAP
-#define RESET_GUARD_TIME 250 // in milliseconds
+// #define RESET_GUARD_TIME 250 // in milliseconds
 
 typedef struct {
     pcre_subst **args; // pcre_subst template for cmd and arguments (0=cmd)
@@ -69,6 +69,18 @@ typedef struct {
     char *key;  // key string used to locate hitlist in avl tree
     ring *hits; // ring with time of each hit
 } keyhits;
+
+// reset item in resets
+typedef struct {
+    keyhits *hits; // pointer to keyhits avl
+    char **argv;   // reset command (as used by execv)
+} treset;
+
+// expire item in expires (to expire items in avls)
+typedef struct {
+    re *re;        // pointer to re associated with hits
+    keyhits *hits; // the hit we want to expire
+} texpire;
 
 typedef struct {
     unsigned int version_major;

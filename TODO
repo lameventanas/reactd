@@ -1,3 +1,4 @@
+- replace expire_list_add() and expire_list_update() with expire_list_set() that should return a pointer to previous item (only if cmp was used to init structure and previous item was found)
 - free hits in hits in re->hitlist after trigger period, otherwise it will keep growing indefinitely
 - add env vars REACT_KEY REACT_FILE REACT_%u when running reset_cmd
 - allow running commands even when key or trigger is not specified
