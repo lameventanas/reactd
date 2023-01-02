@@ -38,7 +38,6 @@
 #define EVENT_REACT_TIME 250000
 #define LOG_CREATE_SCAN_INTERVAL 2000 // in milliseconds
 // #define USE_MMAP
-// #define RESET_GUARD_TIME 250 // in milliseconds
 
 typedef struct {
     pcre_subst **args; // pcre_subst template for cmd and arguments (0=cmd)
@@ -59,7 +58,7 @@ typedef struct {
 } re;
 
 typedef struct {
-    char *name;
+    char *name; // filename
     re *re; // last position marked by null
     off_t pos; // position read until now
     int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
@@ -70,10 +69,19 @@ typedef struct {
     ring *hits; // ring with time of each hit
 } keyhits;
 
+// to remember extra env vars to use when running reset commands
+typedef struct {
+    char **names;
+    char **values;
+    unsigned int len; // number of names and values
+} tenv;
+
 // reset item in resets
 typedef struct {
     keyhits *hits; // pointer to keyhits avl
+    char *logfile; // filename where match occurred (used to set REACT_FILE) (must not be freed, it's a pointer to tfile->name
     char **argv;   // reset command (as used by execv)
+    tenv *env;     // extra vars to setenv()
 } treset;
 
 // expire item in expires (to expire items in avls)

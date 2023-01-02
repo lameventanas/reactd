@@ -73,9 +73,19 @@ int run_prog(char **argv) {
 
 void reset_free(void *reset) {
     printf("freeing reset item 0x%X: %s\n", reset, ((treset *)reset)->hits->key);
+
     for (unsigned int i = 0; ((treset *)reset)->argv[i]; i++)
         free(((treset *)reset)->argv[i]);
     free(((treset *)reset)->argv);
+
+    for (unsigned int i = 0; i < ((treset *)reset)->env->len; i++) {
+        free(((treset *)reset)->env->names[i]);
+        free(((treset *)reset)->env->values[i]);
+    }
+    free(((treset *)reset)->env->names);
+    free(((treset *)reset)->env->values);
+    free(((treset *)reset)->env);
+
     free(reset);
 }
 
@@ -92,8 +102,16 @@ void free_keyhits(void *kh, void *param) {
 void resets_run(void *reset) {
     logw(logh, LOG_DEBUG, "Resetting item with key %s", ((treset *)reset)->hits->key);
     setenv("REACT_KEY", ((treset *)reset)->hits->key, 1);
+    setenv("REACT_FILE", ((treset *)reset)->logfile, 1);
+    for (unsigned int i = 0; i < ((treset *)reset)->env->len; i++)
+        setenv(((treset *)reset)->env->names[i], ((treset *)reset)->env->values[i], 1);
+
     run_prog(((treset *)reset)->argv);
+
     unsetenv("REACT_KEY");
+    for (unsigned int i = 0; i < ((treset *)reset)->env->len; i++)
+        unsetenv(((treset *)reset)->env->names[i]);
+
     reset_free((treset *)reset);
 }
 
@@ -105,6 +123,7 @@ int expire_cmp(const void *a, const void *b) {
 }
 
 // expire items in avl after the period time has passed and no further hits were detected
+// NOTE: nothing really runs, this only frees memory in the avl and the expire_list itself
 void expires_run(void *expire) {
     logw(logh, LOG_DEBUG, "Expiring keyhits for RE %s key %s", ((texpire *)expire)->re->str, ((texpire *)expire)->hits->key);
 
@@ -118,7 +137,6 @@ void expires_run(void *expire) {
 
     free(expire);
 }
-
 
 void free_config() {
     if (cfg.pidfile)
@@ -261,33 +279,31 @@ void proc_line(tfile *tf, char *s) {
 
                         logw(logh, LOG_INFO, "Running %s for %s", argv[0], key);
                         if (run_prog(argv)) {
-                            // TODO: add to unban fifo
                             logw(logh, LOG_DEBUG, "Banned key %s for %u seconds", key, re->reset_time);
                             if (re->reset_cmd != NULL && re->reset_time > 0) {
                                 treset *reset = malloc(sizeof(treset));
                                 assert(reset != NULL);
                                 reset->hits = hits; // hits pointer in avl
+                                reset->logfile = tf->name; // logfile pointer in tf
                                 reset->argv = (char **)malloc((re->reset_cmd->len + 1) * sizeof(char *)); // build argv for execv()
                                 assert(reset->argv != NULL);
                                 for (unsigned int i = 0; i < re->cmd->len; i++)
                                     reset->argv[i] = pcre_subst_replace(s, re->reset_cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
                                 reset->argv[re->reset_cmd->len] = NULL; // null-terminate for execv()
 
+                                // prepare env vars for reset command
+                                reset->env = malloc(sizeof(tenv));
+                                reset->env->names = malloc(match_cnt * sizeof(char **));
+                                reset->env->values = malloc(match_cnt * sizeof(char **));
+                                for (unsigned int i = 0; i < match_cnt; i++) {
+                                    reset->env->names[i] = malloc(7 + num_digits(i));
+                                    sprintf(reset->env->names[i], "REACT_%u", i);
+                                    reset->env->values[i] = strndup(&s[matches[2*i]], matches[2*i+1] - matches[2*i]);
+                                }
+                                reset->env->len = match_cnt;
+
                                 expire_list_add(resets, reset, re->reset_time);
 
-                                // NOTE: reset_list_run callback should free key and reset_argv
-                                // TODO: check this code below:
-                                /*
-                                if (timeout < 0 || timeout > 1000 * re->reset_time + RESET_GUARD_TIME) {
-                                    logw(logh, LOG_DEBUG, "Setting timeout to %u", re->reset_time);
-                                    timeout = 1000 * re->reset_time + RESET_GUARD_TIME;
-                                }
-                                if (timeout < 0 || timeout > 1000 * re->reset_time + RESET_GUARD_TIME) {
-                                    logw(logh, LOG_DEBUG, "Setting timeout to %u", re->reset_time);
-                                    timeout = 1000 * re->reset_time + RESET_GUARD_TIME;
-                                }
-                                logw(logh, LOG_DEBUG, "After ban timeout = %u", timeout);
-                                */
                             }
                         }
                         for (unsigned int i = 0; i < re->cmd->len; i++)
@@ -632,7 +648,7 @@ int main(int argc, char **argv) {
 
     dprint("freeing memory");
     expire_list_free(resets, reset_free);
-    expire_list_free(expires, NULL);
+    expire_list_free(expires, expires_run);
 
     log_close(logh);
     free_config();
