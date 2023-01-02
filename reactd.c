@@ -225,7 +225,7 @@ void proc_line(tfile *tf, char *s) {
                     expire_list_add(expires, expire, re->trigger_time);
                 } else {
                     expire->hits = hits;
-                    expire_list_update(expires, expire, re->trigger_time);
+                    expire_list_set(expires, expire, re->trigger_time);
                     // free expire because we already have one in expires list that we will update instead of inserting this one
                     free(expire);
                 }

@@ -37,7 +37,7 @@ void callback_print(void *obj) {
 
 void TestOne(CuTest *tc) {
     printf("\nTestOne starting\n");
-    texpire_list *list = expire_list_init(strcmp);
+    texpire_list *list = expire_list_init((int (*)(const void *, const void *))strcmp);
 
     printf("t=%d before start\n", time(NULL));
     expire_list_print(list, callback_print);

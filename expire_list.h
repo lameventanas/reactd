@@ -22,9 +22,15 @@ texpire_list *expire_list_init(int (*)(const void *, const void *));
 
 void expire_list_free(texpire_list *list,  void (*callback_free)(void *obj));
 
+// add item
+// NOTE: doesn't check if it already exists
 void expire_list_add(texpire_list *list, void *obj, unsigned int expire_seconds);
 
-void expire_list_update(texpire_list *list, void *obj, unsigned int expire_seconds);
+// add / update existing item
+// NOTE: if item didn't exist, it adds it automatically
+// returns pre-existing item if found (in that case, obj will not be used and maybe should be freed
+// returns obj if it was used (in that case it should presumably not be freed until it expires
+void *expire_list_set(texpire_list *list, void *obj, unsigned int expire_seconds);
 
 // expires all objects that should be expired
 // runs optional callback that should free the object's memory

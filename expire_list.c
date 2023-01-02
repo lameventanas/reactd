@@ -58,7 +58,7 @@ void expire_list_add(texpire_list *list, void *obj, unsigned int expire_seconds)
 
 // this is basically a delete followed by an add
 // uses cmp function to find item if set (if cmp is unset, compares pointers directly)
-void expire_list_update(texpire_list *list, void *obj, unsigned int expire_seconds) {
+void *expire_list_set(texpire_list *list, void *obj, unsigned int expire_seconds) {
     time_t t = time(NULL) + expire_seconds;
 
     // find item
@@ -98,6 +98,8 @@ void expire_list_update(texpire_list *list, void *obj, unsigned int expire_secon
         item->next = list->items;
         list->items = item;
     }
+
+    return item->obj;
 }
 
 void expire_list_run(texpire_list *list, void (*callback_expire)(void *obj)) {
