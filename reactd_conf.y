@@ -374,10 +374,6 @@ int parse_config(char *configfile) {
                 printf("re %d cmd: %s\n", i, n->re[i].cmd->args[0]);
                 printf("re %d key: %s\n", i, n->re[i].key);
 
-                if (n->re[i].key == NULL) {
-                    fprintf(stderr, "log file %s re %u: missing key\n", tf->name, i + 1);
-                    ret = 1;
-                }
                 if (n->re[i].cmd == NULL) {
                     fprintf(stderr, "log file %s re %u: missing command\n", tf->name, i + 1);
                     ret = 1;
@@ -385,13 +381,23 @@ int parse_config(char *configfile) {
 
                 tf->re[i].str = n->re[i].str;
                 tf->re[i].cmd = n->re[i].cmd;
-                tf->re[i].reset_cmd = n->re[i].reset_cmd;
+                if ((n->re[i].trigger_cnt == 0 && n->re[i].trigger_time != 0) ||
+                    (n->re[i].trigger_cnt != 0 && n->re[i].trigger_time == 0)) {
+                    fprintf(stderr, "log file %s re %u: invalid trigger\n", tf->name, i + 1);
+                    ret = 1;
+                }
+                if ((n->re[i].trigger_cnt != 0) && n->re[i].key == NULL) {
+                    fprintf(stderr, "log file %s re %u: trigger needs key\n", tf->name, i + 1);
+                    ret = 1;
+                }
+
                 tf->re[i].trigger_time = n->re[i].trigger_time;
-                tf->re[i].reset_time = n->re[i].reset_time;
                 tf->re[i].trigger_cnt = n->re[i].trigger_cnt;
+                tf->re[i].reset_cmd = n->re[i].reset_cmd;
+                tf->re[i].reset_time = n->re[i].reset_time;
                 tf->re[i].re = pcre_compile(n->re[i].str, 0, &error_msg, &error_off, pcre_tables);
                 if (! tf->re[i].re) {
-                    logw(logh, LOG_ERR, "Error in regular expression '%s' at char %d: %s\n", n->re[i].str, error_off, error_msg);
+                    fprintf(stderr, "log file %s re %u: error in regular expression '%s' at char %d: %s\n", n->re[i].str, error_off, error_msg);
                     ret = 1;
                 } else {
                     tf->re[i].re_studied = pcre_study(tf->re[i].re, 0, &error_msg);
@@ -407,7 +413,9 @@ int parse_config(char *configfile) {
 #endif
                     free(n->re[i].key);
                 }
-                tf->re[i].hitlist = avl_create(keyhits_cmp, NULL, NULL);
+
+                if (tf->re[i].trigger_cnt != 0)
+                    tf->re[i].hitlist = avl_create(keyhits_cmp, NULL, NULL);
             }
             tf++;
             printf("free %p\n", n->re);

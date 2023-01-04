@@ -78,7 +78,8 @@ typedef struct {
 
 // reset item in resets
 typedef struct {
-    keyhits *hits; // pointer to keyhits avl
+    char *key;
+    keyhits *hits; // pointer to keyhits avl (NULL if there is no trigger period set)
     char *logfile; // filename where match occurred (used to set REACT_FILE) (must not be freed, it's a pointer to tfile->name
     char **argv;   // reset command (as used by execv)
     tenv *env;     // extra vars to setenv()

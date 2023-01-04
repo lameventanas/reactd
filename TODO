@@ -1,4 +1,3 @@
-- allow running commands even when key or trigger is not specified
 - Create test unit for subst library
 - Improve dprint() to print times in human-readable form, if possible with milliseconds
 - explore using reflex instead of flex/bison? https://www.genivia.com/doc/reflex/html/

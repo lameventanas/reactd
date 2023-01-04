@@ -72,7 +72,7 @@ int run_prog(char **argv) {
 }
 
 void reset_free(void *reset) {
-    printf("freeing reset item 0x%X: %s\n", reset, ((treset *)reset)->hits->key);
+    printf("freeing reset item 0x%X\n", reset);
 
     for (unsigned int i = 0; ((treset *)reset)->argv[i]; i++)
         free(((treset *)reset)->argv[i]);
@@ -85,6 +85,9 @@ void reset_free(void *reset) {
     free(((treset *)reset)->env->names);
     free(((treset *)reset)->env->values);
     free(((treset *)reset)->env);
+
+    if (((treset *)reset)->key)
+        free(((treset *)reset)->key);
 
     free(reset);
 }
@@ -100,15 +103,21 @@ void free_keyhits(void *kh, void *param) {
 
 // run reset for a specific key
 void resets_run(void *reset) {
-    logw(logh, LOG_DEBUG, "Resetting item with key %s", ((treset *)reset)->hits->key);
-    setenv("REACT_KEY", ((treset *)reset)->hits->key, 1);
+    if (((treset *)reset)->key) {
+        logw(logh, LOG_DEBUG, "Resetting item with key %s", ((treset *)reset)->key);
+        setenv("REACT_KEY", ((treset *)reset)->key, 1);
+    }
+    else {
+        logw(logh, LOG_DEBUG, "Resetting item");
+    }
     setenv("REACT_FILE", ((treset *)reset)->logfile, 1);
     for (unsigned int i = 0; i < ((treset *)reset)->env->len; i++)
         setenv(((treset *)reset)->env->names[i], ((treset *)reset)->env->values[i], 1);
 
     run_prog(((treset *)reset)->argv);
 
-    unsetenv("REACT_KEY");
+    if (((treset *)reset)->hits)
+        unsetenv("REACT_KEY");
     for (unsigned int i = 0; i < ((treset *)reset)->env->len; i++)
         unsetenv(((treset *)reset)->env->names[i]);
 
@@ -215,12 +224,19 @@ void proc_line(tfile *tf, char *s) {
         if (match_cnt > 0) {
             logw(logh, LOG_INFO, "%s matched RE %s count=%d", tf->name, re->str, match_cnt);
 
-            if (re->key != NULL && re->trigger_cnt > 0) {
-                char *key = pcre_subst_replace(s, re->key, matches, 3*capture_cnt, match_cnt, 0);
-                logw(logh, LOG_DEBUG, "got key: %s", key);
+            int run = 0;
+            char *key = NULL;
+            keyhits *hits = NULL;
 
+            if (re->key != NULL) {
+                key = pcre_subst_replace(s, re->key, matches, 3*capture_cnt, match_cnt, 0);
+                logw(logh, LOG_DEBUG, "Got key: %s 0x%X", key, key);
+            }
+
+            // if we have to keep track of these hits (eg: we have a key and trigger)
+            if (re->trigger_cnt > 0) {
+                logw(logh, LOG_DEBUG, "Checking trigger condition for key %s", key);
                 texpire *expire = malloc(sizeof(texpire));
-                logw(logh, LOG_DEBUG, "new expire structure: 0x%X", expire);
                 assert(expire != NULL);
                 expire->re = re;
 
@@ -229,9 +245,9 @@ void proc_line(tfile *tf, char *s) {
                     .hits = NULL
                 };
 
-                keyhits *hits = avl_find(re->hitlist, &search);
+                hits = avl_find(re->hitlist, &search);
                 if (!hits) {
-                    logw(logh, LOG_DEBUG, "creating hit list for %s", key);
+                    logw(logh, LOG_DEBUG, "Creating hit list for %s", key);
                     hits = malloc(sizeof(keyhits));
                     hits->key = strdup(key);
                     hits->hits = ring_init(re->trigger_cnt);
@@ -248,78 +264,101 @@ void proc_line(tfile *tf, char *s) {
                     free(expire);
                 }
 
-
                 time_t *hit_time = malloc(sizeof(time_t));
                 time(hit_time);
                 time_t *old_time = ring_put(hits->hits, (void *)hit_time);
                 if (old_time != NULL)
                     free(old_time);
+
                 if (ring_count(hits->hits) == re->trigger_cnt) {
                     time_t *hit_first = ring_get_oldest(hits->hits, 0);
                     if (*hit_time - *hit_first <= re->trigger_time) {
                         logw(logh, LOG_DEBUG, "%s RE %s triggered by %u hits in %lu seconds", tf->name, re->str, ring_get_size(hits->hits), *hit_time - *hit_first);
-
-                        setenv("REACT_KEY", key, 1);
-                        setenv("REACT_FILE", tf->name, 1);
-
-                        for (unsigned int i = 0; i < match_cnt; i++) {
-                            char *v = strndup(&s[matches[2*i]], matches[2*i+1] - matches[2*i]);
-                            char k[7 + num_digits(i)];
-                            sprintf(k, "REACT_%u", i);
-                            setenv(k, v, 1);
-                            free(v);
-                        }
-
-                        // build argv for execv()
-                        char **argv = (char **)malloc((re->cmd->len + 1) * sizeof(char *));
-                        assert(argv != NULL);
-                        for (unsigned int i = 0; i < re->cmd->len; i++)
-                            argv[i] = pcre_subst_replace(s, re->cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
-                        argv[re->cmd->len] = NULL; // null-terminate for execv()
-
-                        logw(logh, LOG_INFO, "Running %s for %s", argv[0], key);
-                        if (run_prog(argv)) {
-                            logw(logh, LOG_DEBUG, "Banned key %s for %u seconds", key, re->reset_time);
-                            if (re->reset_cmd != NULL && re->reset_time > 0) {
-                                treset *reset = malloc(sizeof(treset));
-                                assert(reset != NULL);
-                                reset->hits = hits; // hits pointer in avl
-                                reset->logfile = tf->name; // logfile pointer in tf
-                                reset->argv = (char **)malloc((re->reset_cmd->len + 1) * sizeof(char *)); // build argv for execv()
-                                assert(reset->argv != NULL);
-                                for (unsigned int i = 0; i < re->cmd->len; i++)
-                                    reset->argv[i] = pcre_subst_replace(s, re->reset_cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
-                                reset->argv[re->reset_cmd->len] = NULL; // null-terminate for execv()
-
-                                // prepare env vars for reset command
-                                reset->env = malloc(sizeof(tenv));
-                                reset->env->names = malloc(match_cnt * sizeof(char **));
-                                reset->env->values = malloc(match_cnt * sizeof(char **));
-                                for (unsigned int i = 0; i < match_cnt; i++) {
-                                    reset->env->names[i] = malloc(7 + num_digits(i));
-                                    sprintf(reset->env->names[i], "REACT_%u", i);
-                                    reset->env->values[i] = strndup(&s[matches[2*i]], matches[2*i+1] - matches[2*i]);
-                                }
-                                reset->env->len = match_cnt;
-
-                                expire_list_add(resets, reset, re->reset_time);
-
-                            }
-                        }
-                        for (unsigned int i = 0; i < re->cmd->len; i++)
-                            free(argv[i]);
-                        free(argv);
-                        unsetenv("REACT_FILE");
-                        unsetenv("REACT_KEY");
-                        for (unsigned int i = 0; i < match_cnt; i++) {
-                            char k[8];
-                            snprintf(k, 8, "REACT_%u", i);
-                            unsetenv(k);
-                        }
+                        run = 1;
                     }
                 }
-                free(key);
+            } else {
+                logw(logh, LOG_DEBUG, "Running command without checking trigger condition");
+                run = 1;
             }
+
+            if (run) {
+                if (key) {
+                    logw(logh, LOG_DEBUG, "Running command for key %s", key);
+                    setenv("REACT_KEY", key, 1);
+                } else {
+                    logw(logh, LOG_DEBUG, "Running command without key");
+                }
+                setenv("REACT_FILE", tf->name, 1);
+
+                for (unsigned int i = 0; i < match_cnt; i++) {
+                    char *v = strndup(&s[matches[2*i]], matches[2*i+1] - matches[2*i]);
+                    char k[7 + num_digits(i)];
+                    sprintf(k, "REACT_%u", i);
+                    setenv(k, v, 1);
+                    free(v);
+                }
+
+                // build argv for execv()
+                char **argv = (char **)malloc((re->cmd->len + 1) * sizeof(char *));
+                assert(argv != NULL);
+                for (unsigned int i = 0; i < re->cmd->len; i++)
+                    argv[i] = pcre_subst_replace(s, re->cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
+                argv[re->cmd->len] = NULL; // null-terminate for execv()
+
+                if (key)
+                    logw(logh, LOG_INFO, "Running %s for %s", argv[0], key);
+                else
+                    logw(logh, LOG_INFO, "Running %s", argv[0]);
+
+                if (run_prog(argv)) {
+                    if (re->reset_cmd != NULL && re->reset_time > 0) {
+                        if (key)
+                            logw(logh, LOG_DEBUG, "Will reset key %s after %u seconds", key, re->reset_time);
+                        else
+                            logw(logh, LOG_DEBUG, "Will reset after %u seconds", re->reset_time);
+                        treset *reset = malloc(sizeof(treset));
+                        assert(reset != NULL);
+                        reset->key = key == NULL ? NULL : strdup(key);
+                        reset->hits = hits; // hits pointer in avl, or NULL when there's no key and trigger_time
+                        reset->logfile = tf->name; // logfile pointer in tf
+                        reset->argv = (char **)malloc((re->reset_cmd->len + 1) * sizeof(char *)); // build argv for execv()
+                        assert(reset->argv != NULL);
+                        for (unsigned int i = 0; i < re->cmd->len; i++)
+                            reset->argv[i] = pcre_subst_replace(s, re->reset_cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
+                        reset->argv[re->reset_cmd->len] = NULL; // null-terminate for execv()
+
+                        // prepare env vars for reset command
+                        reset->env = malloc(sizeof(tenv));
+                        reset->env->names = malloc(match_cnt * sizeof(char **));
+                        reset->env->values = malloc(match_cnt * sizeof(char **));
+                        for (unsigned int i = 0; i < match_cnt; i++) {
+                            reset->env->names[i] = malloc(7 + num_digits(i));
+                            sprintf(reset->env->names[i], "REACT_%u", i);
+                            reset->env->values[i] = strndup(&s[matches[2*i]], matches[2*i+1] - matches[2*i]);
+                        }
+                        reset->env->len = match_cnt;
+
+                        expire_list_add(resets, reset, re->reset_time);
+
+                    }
+                }
+                for (unsigned int i = 0; i < re->cmd->len; i++)
+                    free(argv[i]);
+                free(argv);
+                unsetenv("REACT_FILE");
+                if (key)
+                    unsetenv("REACT_KEY");
+                for (unsigned int i = 0; i < match_cnt; i++) {
+                    char k[8];
+                    snprintf(k, 8, "REACT_%u", i);
+                    unsetenv(k);
+                }
+            }
+
+            if (key)
+                free(key);
+
         }
         free(matches);
     }
