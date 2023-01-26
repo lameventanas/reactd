@@ -19,20 +19,16 @@ log_h *log_open(int dst, int loglevel, char *prefix, char *file) {
         logh->prefix = NULL;
 
     if (dst == LOG_TO_FILE) {
-        printf("logging to file: %s\n", file);
         logh->fh = fopen(file, "a");
         if (logh->fh == NULL) {
             fprintf(stderr, "Error opening %s: %s\n", file, strerror(errno));
             logh->fh = fdopen(2, "a"); // log to STDERR instead
         }
     } else if (dst == LOG_TO_SYSLOG) {
-        puts("logging to syslog");
         openlog(NULL, 0, LOG_DAEMON);
     } else if (dst == LOG_TO_STDOUT) { // stdout
-        puts("logging to stdout");
         logh->fh = fdopen(1, "a");
     } else { // stderr (fallback option)
-        puts("logging to stderr");
         logh->fh = fdopen(2, "a");
     }
     return logh;

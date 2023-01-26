@@ -1,3 +1,9 @@
+dnl This file is processed to m4 to generate flex lexical analyzer
+dnl
+dnl use utf8 Japanese quotes for m4 quotes
+changequote(「,」)
+dnl use utf8 black square for m4 comments
+changecom(`■')
 /*
  * flex input to generate lexical analyzer for configuration file parser
  */
@@ -5,15 +11,21 @@
 %{
 #include "reactd_conf.tab.h"
 #include "log.h"
+#include "debug.h"
 
 ;
 %}
-%option noyywrap noinput nounput nounput
+%option noyywrap noinput nounput yylineno
 
 %%
+#.*        ; // ignore comments
 [ \t\n]+
-@version   { return VERSION_KEY;   }
-@options   { return OPTIONS_KEY;   }
+\.          { return DOT; }
+[\{\},=]    { return yytext[0]; } // return single characters that are used in the config file
+[1-9][0-9]* { yylval.ival = atoi(yytext); return POSITIVE_INT; }
+
+version    { return VERSION_KEY;   }
+options    { return OPTIONS_KEY;   }
 pidfile    { return PIDFILE_KEY;   }
 logdst     { return LOGDST_KEY;   }
 logfile    { return LOGFILE_KEY;   }
@@ -30,13 +42,16 @@ loglevel   { return LOGLEVEL_KEY;  }
     return LOGLEVEL;
 }
 
+ifdef(「SYSTEMD」,「
+journal    { return JOURNAL_KEY; }
+」)
 command    { return COMMAND_KEY; }
 key        { return KEY_KEY;     }
 trigger    { return TRIGGER_KEY; }
 reset      { return RESET_KEY;   }
 timeout    { return TIMEOUT_KEY; }
 " in "     { return IN_KEY;      }
-[0-9]+[ \t]+(second|minute|hour|day)s?    {
+[1-9][0-9]*[ \t]+(second|minute|hour|day)s?    {
     int num;
     char unit[7];
     sscanf(yytext, "%d %s", &num, unit);
@@ -52,36 +67,34 @@ timeout    { return TIMEOUT_KEY; }
     return TIMEPERIOD;
 }
 
-
-[0-9]+          { yylval.ival = atoi(yytext); return INT; }
-
-\"([^\"]|\\\")*\"          { // not quote or quote preceded by escape
+\/([^\/]|\\\/)+\/ { // regex
     // we have to copy because we can't rely on yytext not changing underneath us:
     yylval.sval = strndup(yytext+1, strlen(yytext)-2);
-    // printf("strndup: %p %s\n", yylval.sval, yylval.sval);
-    return STRING;
-}
-
-\/([^\/]|\\\/)+\/        {
-    // we have to copy because we can't rely on yytext not changing underneath us:
-    yylval.sval = strndup(yytext+1, strlen(yytext)-2);
-    // printf("strndup: %p %s\n", yylval.sval, yylval.sval);
     return REGEX;
 }
 
-\. { return DOT; }
+\"([^\"]|\\\")*\" { // quoted string
+    // we have to copy because we can't rely on yytext not changing underneath us:
+    yylval.sval = strndup(yytext+1, strlen(yytext)-2);
+    return STRING;
+}
 
-[\{\},=]  { return yytext[0]; } // return single characters that are used in the config file
-
-#.*        ; // ignore comments
+[^ "\n]([^ "\n\\]|\\[ "])*     { // unquoted string, spaces and quotes are allowed if preceded by escape
+    yylval.sval = strdup(yytext);
+    return STRING;
+}
 
 
 <<EOF>> {
-    printf("EOF of config file\n");
+    dprint("EOF of config file");
     yy_delete_buffer(YY_CURRENT_BUFFER);
     yyterminate();
 }
 
+. {
+    printf("Unrecognized token in line %u: ->%s<-\n", yylineno, yytext);
+    yyterminate();
+}
 
 %%
 /*

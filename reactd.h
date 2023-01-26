@@ -5,9 +5,9 @@
 #define DEFAULT_STATEFILE "/var/run/reactd/reactd.db"
 
 #define VERSION "0.1"
-// #define PROGRAM_NAME "reactd"
-// #define EXIT_SUCCESS 0
-// #define EXIT_FAILURE 1
+#define PROGRAM_NAME "reactd"
+#define EXIT_SUCCESS 0
+#define EXIT_FAILURE 1
 
 #include <pcre.h>
 
@@ -39,31 +39,58 @@
 #define LOG_CREATE_SCAN_INTERVAL 2000 // in milliseconds
 // #define USE_MMAP
 
+#define POLL_FD_INOTIFY 0
+
 typedef struct {
     pcre_subst **args; // pcre_subst template for cmd and arguments (0=cmd)
-    unsigned int len;  // number of template strings in args
+    unsigned int cnt;  // number of template strings in args
 } tcmd;
 
+// regex
 typedef struct {
     char *str;
     tcmd *cmd;
     tcmd *reset_cmd;
     unsigned int trigger_time; // in seconds
+    unsigned int trigger_cnt; // max number of hits (size of ring)
     unsigned int reset_time;
     pcre *re;
-    pcre_extra *re_studied;
+    pcre_extra *studied;      // result of pcre_study()
+    unsigned int capture_cnt; // number of capture groups, including one for \0
     pcre_subst *key;
-    struct avl_table *hitlist; // list of keyhits, where key is presumably the IP
-    unsigned int trigger_cnt; // max number of hits (size of ring)
+    struct avl_table *hitlist; // avl of keyhits, where key is presumably the IP
 } re;
 
+// tailed file
 typedef struct {
-    char *name; // filename
-    re *re; // last position marked by null
-    off_t pos; // position read until now
-    int watchfd; // unique watch descriptor associated with this file (as returned from inotify_add_watch)
-} tfile; // tailed file type
+    char *name;          // filename
+    re **re;             // re's
+    unsigned int re_cnt; // number of re's
+    off_t pos;           // position read until now
+    int watchfd;         // unique watch descriptor associated with this file (as returned from inotify_add_watch)
+} tfile;
 
+#ifndef SYSTEMD
+#define POLL_FD_CNT 1
+#else
+#define POLL_FD_CNT 2
+#define POLL_FD_JOURNAL 1
+// journal filters
+typedef struct {
+    char **fields;
+    char **values;
+    unsigned int cnt;
+} tj_filters;
+
+// tailed journal
+typedef struct {
+    tj_filters *filters;  // journal filters
+    re **re;              // re's
+    unsigned int re_cnt;  // number of re's
+} tjournal;
+#endif
+
+// avl tuple node for hitlist in re's for both files and journal
 typedef struct {
     char *key;  // key string used to locate hitlist in avl tree
     ring *hits; // ring with time of each hit
@@ -73,22 +100,22 @@ typedef struct {
 typedef struct {
     char **names;
     char **values;
-    unsigned int len; // number of names and values
+    unsigned int cnt; // number of names and values
 } tenv;
 
 // reset item in resets
 typedef struct {
     char *key;
     keyhits *hits; // pointer to keyhits avl (NULL if there is no trigger period set)
-    char *logfile; // filename where match occurred (used to set REACT_FILE) (must not be freed, it's a pointer to tfile->name
+    char *source;  // source where match occurred (used to set REACT_SOURCE) (must not be freed, it's a pointer to tfile->name or "journal" in text section
     char **argv;   // reset command (as used by execv)
     tenv *env;     // extra vars to setenv()
 } treset;
 
-// expire item in expires (to expire items in avls)
+// expire item in expires (to expire items in avls of both files and journals)
 typedef struct {
     re *re;        // pointer to re associated with hits
-    keyhits *hits; // the hit we want to expire
+    keyhits *hits; // the hits we want to expire
 } texpire;
 
 typedef struct {

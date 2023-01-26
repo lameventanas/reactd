@@ -1,7 +1,11 @@
+- add ipset() functionality directly (optional at compile time)
 - Create test unit for subst library
 - Improve dprint() to print times in human-readable form, if possible with milliseconds
 - explore using reflex instead of flex/bison? https://www.genivia.com/doc/reflex/html/
-- add systemd journal functionality via sd_journal_open() and sd_journal_get_events() (optional at compile time)
-- add ipset() functionality directly (optional at compile time)
 - pcre_subst: by default don't replace \\ \n \r \t \e \a when creating template
 - pcre_subst: rename to pcre_tpl?
+- use clock_gettime() with CLOCK_MONOTONIC to keep track of elapsed time
+
+- add something to RE so that it doesn't continue checking the other REGEXes, for example: final
+- add an exclusion regex, for example: ignore = //
+- allow to include config files, eg: include "/etc/reaction/*.conf"

@@ -15,12 +15,23 @@
 #include <time.h>
 #include <math.h>
 
+#ifdef SYSTEMD
+#include <systemd/sd-journal.h>
+#endif
+
 #include "avl.h"
 #include "expire_list.h"
 #include "log.h"
 #include "reactd.h"
 
-extern tfile *tfs;
+// from reactd_conf.y
+extern tfile **tf;
+extern unsigned int tf_cnt;
+#ifdef SYSTEMD
+extern tjournal **tj;
+extern unsigned int tj_cnt;
+#endif
+extern tglobal_cfg cfg;
 
 unsigned char *pcre_tables = NULL;
 
@@ -31,8 +42,6 @@ texpire_list *expires = NULL; // keep track of hits in file->res->hitlist to exp
 // int timeout = -1; // poll timeout for all files, -1 if all monitored files exist, otherwise LOG_CREATE_SCAN_INTERVAL
 
 static volatile sig_atomic_t exit_flag = 0;
-
-struct pollfd pollwatch; // used to store inotify file descriptor and to poll it for read events
 
 static void __attribute__ ((__noreturn__)) usage(FILE *out)
 {
@@ -49,7 +58,6 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
     exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 
-
 int run_prog(char **argv) {
     pid_t pid = fork();
     if (pid == 0) {
@@ -58,9 +66,8 @@ int run_prog(char **argv) {
             logw(logh, LOG_ERR, "daemon: %m");
             exit(1);
         }
-        printf("Running %s\n", argv[0]);
+        logw(logh, LOG_DEBUG, "Running %s", argv[0]);
         execv(argv[0], argv);
-        printf("Could not run %s: %s\n", strerror(errno));
         logw(logh, LOG_ERR, "Could not run %s: %m", argv[0]);
         exit(1);
     }
@@ -72,13 +79,11 @@ int run_prog(char **argv) {
 }
 
 void reset_free(void *reset) {
-    printf("freeing reset item 0x%X\n", reset);
-
     for (unsigned int i = 0; ((treset *)reset)->argv[i]; i++)
         free(((treset *)reset)->argv[i]);
     free(((treset *)reset)->argv);
 
-    for (unsigned int i = 0; i < ((treset *)reset)->env->len; i++) {
+    for (unsigned int i = 0; i < ((treset *)reset)->env->cnt; i++) {
         free(((treset *)reset)->env->names[i]);
         free(((treset *)reset)->env->values[i]);
     }
@@ -110,15 +115,15 @@ void resets_run(void *reset) {
     else {
         logw(logh, LOG_DEBUG, "Resetting item");
     }
-    setenv("REACT_FILE", ((treset *)reset)->logfile, 1);
-    for (unsigned int i = 0; i < ((treset *)reset)->env->len; i++)
+    setenv("REACT_SOURCE", ((treset *)reset)->source, 1);
+    for (unsigned int i = 0; i < ((treset *)reset)->env->cnt; i++)
         setenv(((treset *)reset)->env->names[i], ((treset *)reset)->env->values[i], 1);
 
     run_prog(((treset *)reset)->argv);
 
     if (((treset *)reset)->hits)
         unsetenv("REACT_KEY");
-    for (unsigned int i = 0; i < ((treset *)reset)->env->len; i++)
+    for (unsigned int i = 0; i < ((treset *)reset)->env->cnt; i++)
         unsetenv(((treset *)reset)->env->names[i]);
 
     reset_free((treset *)reset);
@@ -147,221 +152,160 @@ void expires_run(void *expire) {
     free(expire);
 }
 
-void free_config() {
-    if (cfg.pidfile)
-        free(cfg.pidfile);
-    if (cfg.logfile)
-        free(cfg.logfile);
-    if (cfg.logprefix)
-        free(cfg.logprefix);
-
-    for (tfile *tf = tfs; tf->name; tf++) {
-        dprint("freeing TF %s %p\n", tf->name, tf->name);
-        free(tf->name);
-        for (re *re = tf->re; re->str; re++) {
-            dprint("    freeing RE %s %p\n", re->str, re->str);
-            free(re->str);
-            if (re->re)
-                pcre_free(re->re);
-            if (re->cmd) {
-                dprint("freeing cmd");
-                for (unsigned int i = 0; i < re->cmd->len; i++) {
-#ifdef DEBUG
-                    {
-                        char *tmp = pcre_subst_str(re->cmd->args[i]);
-                        dprint("freeing cmd arg %u: %s", i, tmp);
-                        free(tmp);
-                    }
-#endif
-                    pcre_subst_free(re->cmd->args[i]);
-                }
-                free(re->cmd->args);
-                free(re->cmd);
-            }
-            if (re->reset_cmd) {
-                dprint("freeing reset_cmd");
-                for (unsigned int i = 0; i < re->reset_cmd->len; i++) {
-#ifdef DEBUG
-                    {
-                        char *tmp = pcre_subst_str(re->reset_cmd->args[i]);
-                        dprint("freeing reset_cmd arg %u: %s", i, tmp);
-                        free(tmp);
-                    }
-#endif
-                    pcre_subst_free(re->reset_cmd->args[i]);
-                }
-                free(re->reset_cmd->args);
-                free(re->reset_cmd);
-            }
-            if (re->re_studied)
-                pcre_free_study(re->re_studied);
-            if (re->key)
-                pcre_subst_free(re->key);
-            if (re->hitlist)
-                avl_destroy(re->hitlist, free_keyhits);
-        }
-        free(tf->re);
-    }
-    free(tfs);
-}
-
 // note: this only works for x>=0
 #define num_digits(x) (unsigned int)(x==0?1:(1+log10(x)))
 
-// callback for tail_lines
-// runs record_hit function
-void proc_line(tfile *tf, char *s) {
-    for (re *re = tf->re; re->str; re++) {
-        int capture_cnt; // used to determine number of capture groups
+void proc_re(char *source, re *re, char *msg) {
+    int *filter_matches = malloc(3 * re->capture_cnt * sizeof(int));
 
-        // TODO: move capture_cnt to tf structure?
-        pcre_fullinfo(re->re, re->re_studied, PCRE_INFO_CAPTURECOUNT, &capture_cnt);
-        capture_cnt++; // add space for \0
-        int *matches = malloc(3 * capture_cnt * sizeof(int));
+    logw(logh, LOG_DEBUG, "matching %s re %s against %s", source, re->str, msg);
+    int filter_match_cnt = pcre_exec(re->re, re->studied, msg, strlen(msg), 0, 0, filter_matches, 3 * re->capture_cnt);
+    if (filter_match_cnt > 0) {
+        logw(logh, LOG_INFO, "%s matched RE %s count=%d", source, re->str, filter_match_cnt);
 
-        logw(logh, LOG_DEBUG, "matching re %s against %s", re->str, s);
-        int match_cnt = pcre_exec(re->re, re->re_studied, s, strlen(s), 0, 0, matches, 3 * capture_cnt);
-        if (match_cnt > 0) {
-            logw(logh, LOG_INFO, "%s matched RE %s count=%d", tf->name, re->str, match_cnt);
+        int run = 0;
+        char *key = NULL;
+        keyhits *hits = NULL;
 
-            int run = 0;
-            char *key = NULL;
-            keyhits *hits = NULL;
+        if (re->key != NULL) {
+            key = pcre_subst_replace(msg, re->key, filter_matches, 3 * re->capture_cnt, filter_match_cnt, 0);
+            logw(logh, LOG_DEBUG, "Got key: %s 0x%X", key, key);
+        }
 
-            if (re->key != NULL) {
-                key = pcre_subst_replace(s, re->key, matches, 3*capture_cnt, match_cnt, 0);
-                logw(logh, LOG_DEBUG, "Got key: %s 0x%X", key, key);
-            }
+        // if we have to keep track of these hits (eg: we have a key and trigger)
+        if (re->trigger_cnt > 0) {
+            logw(logh, LOG_DEBUG, "Checking trigger condition for key %s", key);
+            texpire *expire = malloc(sizeof(texpire));
+            expire->re = re;
 
-            // if we have to keep track of these hits (eg: we have a key and trigger)
-            if (re->trigger_cnt > 0) {
-                logw(logh, LOG_DEBUG, "Checking trigger condition for key %s", key);
-                texpire *expire = malloc(sizeof(texpire));
-                assert(expire != NULL);
-                expire->re = re;
+            keyhits search = {
+                .key = key,
+                .hits = NULL
+            };
 
-                keyhits search = {
-                    .key = key,
-                    .hits = NULL
-                };
+            hits = avl_find(re->hitlist, &search);
+            if (!hits) {
+                logw(logh, LOG_DEBUG, "Creating hit list for %s", key);
+                hits = malloc(sizeof(keyhits));
+                hits->key = strdup(key);
+                hits->hits = ring_init(re->trigger_cnt);
+                avl_insert(re->hitlist, hits);
+                // expire hits after trigger_time
+                // ie: if the trigger is 5 in 10 minutes, and 10 minutes have passed with no hits, remove from avl
 
-                hits = avl_find(re->hitlist, &search);
-                if (!hits) {
-                    logw(logh, LOG_DEBUG, "Creating hit list for %s", key);
-                    hits = malloc(sizeof(keyhits));
-                    hits->key = strdup(key);
-                    hits->hits = ring_init(re->trigger_cnt);
-                    avl_insert(re->hitlist, hits);
-                    // expire hits after trigger_time
-                    // ie: if the trigger is 5 in 10 minutes, and 10 minutes have passed with no hits, remove from avl
-
-                    expire->hits = hits;
-                    expire_list_add(expires, expire, re->trigger_time);
-                } else {
-                    expire->hits = hits;
-                    expire_list_set(expires, expire, re->trigger_time);
-                    // free expire because we already have one in expires list that we will update instead of inserting this one
-                    free(expire);
-                }
-
-                time_t *hit_time = malloc(sizeof(time_t));
-                time(hit_time);
-                time_t *old_time = ring_put(hits->hits, (void *)hit_time);
-                if (old_time != NULL)
-                    free(old_time);
-
-                if (ring_count(hits->hits) == re->trigger_cnt) {
-                    time_t *hit_first = ring_get_oldest(hits->hits, 0);
-                    if (*hit_time - *hit_first <= re->trigger_time) {
-                        logw(logh, LOG_DEBUG, "%s RE %s triggered by %u hits in %lu seconds", tf->name, re->str, ring_get_size(hits->hits), *hit_time - *hit_first);
-                        run = 1;
-                    }
-                }
+                expire->hits = hits;
+                expire_list_add(expires, expire, re->trigger_time);
             } else {
-                logw(logh, LOG_DEBUG, "Running command without checking trigger condition");
-                run = 1;
+                expire->hits = hits;
+                expire_list_set(expires, expire, re->trigger_time);
+                // free expire because we already have one in expires list that we will update instead of inserting this one
+                free(expire);
             }
 
-            if (run) {
-                if (key) {
-                    logw(logh, LOG_DEBUG, "Running command for key %s", key);
-                    setenv("REACT_KEY", key, 1);
-                } else {
-                    logw(logh, LOG_DEBUG, "Running command without key");
-                }
-                setenv("REACT_FILE", tf->name, 1);
+            time_t *hit_time = malloc(sizeof(time_t));
+            time(hit_time);
+            time_t *old_time = ring_put(hits->hits, (void *)hit_time);
+            if (old_time != NULL)
+                free(old_time);
 
-                for (unsigned int i = 0; i < match_cnt; i++) {
-                    char *v = strndup(&s[matches[2*i]], matches[2*i+1] - matches[2*i]);
-                    char k[7 + num_digits(i)];
-                    sprintf(k, "REACT_%u", i);
-                    setenv(k, v, 1);
-                    free(v);
-                }
-
-                // build argv for execv()
-                char **argv = (char **)malloc((re->cmd->len + 1) * sizeof(char *));
-                assert(argv != NULL);
-                for (unsigned int i = 0; i < re->cmd->len; i++)
-                    argv[i] = pcre_subst_replace(s, re->cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
-                argv[re->cmd->len] = NULL; // null-terminate for execv()
-
-                if (key)
-                    logw(logh, LOG_INFO, "Running %s for %s", argv[0], key);
-                else
-                    logw(logh, LOG_INFO, "Running %s", argv[0]);
-
-                if (run_prog(argv)) {
-                    if (re->reset_cmd != NULL && re->reset_time > 0) {
-                        if (key)
-                            logw(logh, LOG_DEBUG, "Will reset key %s after %u seconds", key, re->reset_time);
-                        else
-                            logw(logh, LOG_DEBUG, "Will reset after %u seconds", re->reset_time);
-                        treset *reset = malloc(sizeof(treset));
-                        assert(reset != NULL);
-                        reset->key = key == NULL ? NULL : strdup(key);
-                        reset->hits = hits; // hits pointer in avl, or NULL when there's no key and trigger_time
-                        reset->logfile = tf->name; // logfile pointer in tf
-                        reset->argv = (char **)malloc((re->reset_cmd->len + 1) * sizeof(char *)); // build argv for execv()
-                        assert(reset->argv != NULL);
-                        for (unsigned int i = 0; i < re->cmd->len; i++)
-                            reset->argv[i] = pcre_subst_replace(s, re->reset_cmd->args[i], matches, 3*capture_cnt, match_cnt, 0);
-                        reset->argv[re->reset_cmd->len] = NULL; // null-terminate for execv()
-
-                        // prepare env vars for reset command
-                        reset->env = malloc(sizeof(tenv));
-                        reset->env->names = malloc(match_cnt * sizeof(char **));
-                        reset->env->values = malloc(match_cnt * sizeof(char **));
-                        for (unsigned int i = 0; i < match_cnt; i++) {
-                            reset->env->names[i] = malloc(7 + num_digits(i));
-                            sprintf(reset->env->names[i], "REACT_%u", i);
-                            reset->env->values[i] = strndup(&s[matches[2*i]], matches[2*i+1] - matches[2*i]);
-                        }
-                        reset->env->len = match_cnt;
-
-                        expire_list_add(resets, reset, re->reset_time);
-
-                    }
-                }
-                for (unsigned int i = 0; i < re->cmd->len; i++)
-                    free(argv[i]);
-                free(argv);
-                unsetenv("REACT_FILE");
-                if (key)
-                    unsetenv("REACT_KEY");
-                for (unsigned int i = 0; i < match_cnt; i++) {
-                    char k[8];
-                    snprintf(k, 8, "REACT_%u", i);
-                    unsetenv(k);
+            if (ring_count(hits->hits) == re->trigger_cnt) {
+                time_t *hit_first = ring_get_oldest(hits->hits, 0);
+                if (*hit_time - *hit_first <= re->trigger_time) {
+                    logw(logh, LOG_DEBUG, "%s RE %s triggered by %u hits in %lu seconds", source, re->str, ring_get_size(hits->hits), *hit_time - *hit_first);
+                    run = 1;
                 }
             }
+        } else {
+            logw(logh, LOG_DEBUG, "Running command without checking trigger condition");
+            run = 1;
+        }
+
+        if (run) {
+            if (key) {
+                logw(logh, LOG_DEBUG, "Running command for key %s", key);
+                setenv("REACT_KEY", key, 1);
+            } else {
+                logw(logh, LOG_DEBUG, "Running command without key");
+            }
+            setenv("REACT_SOURCE", source, 1);
+
+            for (unsigned int i = 0; i < filter_match_cnt; i++) {
+                char *v = strndup(&msg[filter_matches[2*i]], filter_matches[2*i+1] - filter_matches[2*i]);
+                char k[7 + num_digits(i)];
+                sprintf(k, "REACT_%u", i);
+                setenv(k, v, 1);
+                free(v);
+            }
+
+            // build argv for execv()
+            char **argv = (char **)malloc((re->cmd->cnt + 1) * sizeof(char *));
+            assert(argv != NULL);
+            for (unsigned int i = 0; i < re->cmd->cnt; i++)
+                argv[i] = pcre_subst_replace(msg, re->cmd->args[i], filter_matches, 3 * re->capture_cnt, filter_match_cnt, 0);
+            argv[re->cmd->cnt] = NULL; // null-terminate for execv()
 
             if (key)
-                free(key);
+                logw(logh, LOG_INFO, "Running %s for %s", argv[0], key);
+            else
+                logw(logh, LOG_INFO, "Running %s", argv[0]);
 
+            if (run_prog(argv)) {
+                if (re->reset_cmd != NULL && re->reset_time > 0) {
+                    if (key)
+                        logw(logh, LOG_DEBUG, "Will reset key %s after %u seconds", key, re->reset_time);
+                    else
+                        logw(logh, LOG_DEBUG, "Will reset after %u seconds", re->reset_time);
+                    treset *reset = malloc(sizeof(treset));
+                    assert(reset != NULL);
+                    reset->key = key == NULL ? NULL : strdup(key);
+                    reset->hits = hits; // hits pointer in avl, or NULL when there's no key and trigger_time
+                    reset->source = source; // source pointer in tf (eg: filename or journal)
+                    reset->argv = (char **)malloc((re->reset_cmd->cnt + 1) * sizeof(char *)); // build argv for execv()
+                    assert(reset->argv != NULL);
+                    for (unsigned int i = 0; i < re->cmd->cnt; i++)
+                        reset->argv[i] = pcre_subst_replace(msg, re->reset_cmd->args[i], filter_matches, 3 * re->capture_cnt, filter_match_cnt, 0);
+                    reset->argv[re->reset_cmd->cnt] = NULL; // null-terminate for execv()
+
+                    // prepare env vars for reset command
+                    reset->env = malloc(sizeof(tenv));
+                    reset->env->names = malloc(filter_match_cnt * sizeof(char **));
+                    reset->env->values = malloc(filter_match_cnt * sizeof(char **));
+                    for (unsigned int i = 0; i < filter_match_cnt; i++) {
+                        reset->env->names[i] = malloc(7 + num_digits(i));
+                        sprintf(reset->env->names[i], "REACT_%u", i);
+                        reset->env->values[i] = strndup(&msg[filter_matches[2*i]], filter_matches[2*i+1] - filter_matches[2*i]);
+                    }
+                    reset->env->cnt = filter_match_cnt;
+
+                    expire_list_add(resets, reset, re->reset_time);
+
+                }
+            }
+            for (unsigned int i = 0; i < re->cmd->cnt; i++)
+                free(argv[i]);
+            free(argv);
+            unsetenv("REACT_SOURCE");
+            if (key)
+                unsetenv("REACT_KEY");
+            for (unsigned int i = 0; i < filter_match_cnt; i++) {
+                char k[8];
+                snprintf(k, 8, "REACT_%u", i);
+                unsetenv(k);
+            }
         }
-        free(matches);
+
+        if (key)
+            free(key);
+
     }
+    free(filter_matches);
+}
+
+// callback for tail_lines
+// runs record_hit function
+void proc_line(tfile *tf, char *msg) {
+    for (unsigned int ri = 0; ri < tf->re_cnt; ri++)
+        proc_re(tf->name, tf->re[ri], msg);
 }
 
 void tail_lines(tfile *tf, void (*callback)(tfile *, char *)) {
@@ -481,101 +425,143 @@ void tail_lines(tfile *tf, void (*callback)(tfile *, char *)) {
     logw(logh, LOG_DEBUG, "new tail pos: %ld size: %ld", tf->pos, st.st_size);
 }
 
-void prog_exit(int sig) {
-    logw(logh, LOG_NOTICE, "Received signal %d, exiting", sig);
-    exit_flag = 1;
+#ifdef SYSTEMD
+void proc_journal(tjournal *tj, char *msg) {
+    for (unsigned int ri = 0; ri < tj->re_cnt; ri++)
+        proc_re("journal", tj->re[ri], msg);
 }
 
-int main(int argc, char **argv) {
-    dprint_init();
-    char *config = DEFAULT_CONFIG;
-    int ch;
-
-    static const struct option longopts[] = {
-        { "config",       required_argument, 0, 'c' },
-        { "pidfile",      required_argument, 0, 'p' },
-        { "statefile",    required_argument, 0, 's' },
-        { "version",      no_argument,       0, 'V' },
-        { "help",         no_argument,       0, 'h' },
-        { NULL, 0, 0, 0 }
-    };
-
-    while ((ch = getopt_long(argc, argv, "c:Vh", longopts, NULL)) != -1)
-        switch((char)ch) {
-            case 'c':
-                config = optarg;
-                break;
-            case 'V':
-                printf("reactd version %s\n", VERSION);
-                exit(0);
-            case 'h':
-                usage(stdout);
-            default:
-                usage(stderr);
+void tail_journal(sd_journal *j) {
+    if (0 > sd_journal_process(j)) {
+        logw(logh, LOG_ERR, "Error processing journal events: %s", strerror(errno));
+        return;
     }
+    while (sd_journal_next(j) > 0) {
+        const void *d;
+        size_t l;
+        unsigned int cnt = 0;
 
-    memset(&cfg, 0, sizeof(cfg));
-    if (0 != parse_config(config)) {
-        printf("Error parsing %s\n", config);
-        return 1;
+        int filter_match = 1;
+        for (unsigned int tji = 0; filter_match && tji < tj_cnt; tji++) {
+            tj_filters *jf = tj[tji]->filters;
+            const void *data;
+            void *value;
+            size_t len;
+
+            //  check if all filters match for this tj
+            for (unsigned int jfi = 0; jfi < jf->cnt; jfi++) {
+                if (0 > sd_journal_get_data(j, jf->fields[jfi], &data, &len)) {
+                    logw(logh, LOG_ERR, "Error getting data from journal: %s", strerror(errno));
+                    filter_match = 0;
+                    break;
+                }
+                value = index(data, '=') + 1;
+
+                if (len - (value - data) != strlen(jf->values[jfi]) || strncmp(jf->values[jfi], value, len - (value - data))) {
+                    filter_match = 0;
+                    break;
+                }
+            }
+            if (filter_match) {
+                // filters matched tj, now check all regexes for this tj
+                if (0 > sd_journal_get_data(j, "MESSAGE", &data, &len)) {
+                    logw(logh, LOG_ERR, "Error getting message from journal: %s", strerror(errno));
+                } else {
+                    value = index(data, '=') + 1;
+                    char *msg = strndup(value, len - (value - data));
+                    proc_journal(tj[tji], msg);
+                    free(msg);
+                }
+
+            }
+        }
+
     }
+}
+#endif
 
-    logh = log_open(cfg.logdst, cfg.loglevel, cfg.logprefix, cfg.logfile);
-    signal(SIGCHLD, SIG_IGN);
-    signal(SIGINT, prog_exit);
-    signal(SIGTERM, prog_exit);
+// main loop
+// at this point we have all the config and log initialized
+int react_main() {
+    struct pollfd pw[POLL_FD_CNT]; // used to store: 0:inotify and 1:journal file descriptors and to poll for read/delete events
+    int timeout = -1; // for poll(), will be the smallest after considering reset_list, expire_hits and LOG_CREATE_INTERVAL
+    unsigned int tf_cnt_exist = 0; // number of monitored files that exist
 
     logw(logh, LOG_INFO, "Starting reactd");
 
-    // pcre vars
-    pcre_tables = (unsigned char *)pcre_maketables();
-    // printf("pcre_tables: %p\n", pcre_tables);
-    const char *error_msg;
-    int error_off;
-
     dprint("Global options:\nversion: %u.%u\npidfile: %s\nlogging: %s\nloglevel: %s\n", cfg.version_major, cfg.version_minor, cfg.pidfile, logdst_str(cfg.logdst), loglevel_str(cfg.loglevel));
 
-    // Initialize global inotify fd and poll structure
-    pollwatch.fd = inotify_init();
-    pollwatch.events = POLLIN;
+    if (tf_cnt > 0) {
+        // Initialize global inotify fd and poll structure
+        pw[POLL_FD_INOTIFY].fd = inotify_init();
+        pw[POLL_FD_INOTIFY].events = POLLIN;
 
-    // TODO: sd_journal_open() then sd_journal_get_events() to get logs from journald and put it in pollwatch
-
-    if (pollwatch.fd == -1) {
-        logw(logh, LOG_ERR, "Error in inotify_init(): %s", strerror(errno));
-        exit(1);
-    }
-
-    resets = expire_list_init(NULL);
-    expires = expire_list_init(expire_cmp);
-
-    struct stat st;
-    unsigned int tf_cnt_exist = 0; // number of monitored files that exist
-    unsigned int tf_cnt_total = 0; // number of monitored files
-    int timeout = -1; // for poll(), will be the smallest after considering reset_list, expire_hits and LOG_CREATE_INTERVAL
-
-    for (tfile *tf = tfs; tf->name; tf++) {
-        tf_cnt_total++;
-        tf->watchfd = inotify_add_watch(pollwatch.fd, tf->name, IN_MODIFY|IN_IGNORED);
-        if (-1 == stat(tf->name, &st)) {
-            // file to monitor doesn't exist
-            timeout = LOG_CREATE_SCAN_INTERVAL;
-            logw(logh, LOG_DEBUG, "%s doesn't exist, new timeout: %d", tf->name, timeout);
-            tf->pos = 0;
-        } else {
-            tf_cnt_exist++;
-            tf->pos = st.st_size;
-            logw(logh, LOG_DEBUG, "%s position: %lu", tf->name, tf->pos);
+        if (pw[POLL_FD_INOTIFY].fd == -1) {
+            logw(logh, LOG_ERR, "Error in inotify_init(): %s", strerror(errno));
+            return EXIT_FAILURE;
         }
 
-        // for (int i = 0; tf->re[i].str; i++) printf("    re: %p %s\n", tf->re[i], tf->re[i].str);
+        struct stat st;
+        for (unsigned int i = 0; i < tf_cnt; i++) {
+            tf[i]->watchfd = inotify_add_watch(pw[0].fd, tf[i]->name, IN_MODIFY|IN_IGNORED);
+            if (-1 == stat(tf[i]->name, &st)) {
+                // file to monitor doesn't exist
+                timeout = LOG_CREATE_SCAN_INTERVAL;
+                logw(logh, LOG_DEBUG, "%s doesn't exist, new timeout: %d", tf[i]->name, timeout);
+                // tfs[i]->pos = 0;
+            } else {
+                tf_cnt_exist++;
+                tf[i]->pos = st.st_size;
+                logw(logh, LOG_DEBUG, "%s position: %lu", tf[i]->name, tf[i]->pos);
+            }
+        }
+    } else {
+#ifdef SYSTEMD
+            pw[POLL_FD_INOTIFY].fd = -1;
+            logw(logh, LOG_DEBUG, "Not monitoring any files");
+#else
+            logw(logh, LOG_ERR, "Nothing to monitor");
+            return EXIT_FAILURE;
+#endif
     }
 
+#ifdef SYSTEMD
+    sd_journal *j = NULL;
+    if (tj_cnt > 0) {
+        int r;
+
+        if (0 > sd_journal_open(&j, SD_JOURNAL_SYSTEM)) {
+            logw(logh, LOG_ERR, "Error opening journal: %m");
+            return EXIT_FAILURE;
+        }
+        if (0 > sd_journal_seek_tail(j)) {
+            logw(logh, LOG_ERR, "Error seeking in journal: %m");
+            return EXIT_FAILURE;
+        }
+        if (0 > sd_journal_next(j)) {
+            logw(logh, LOG_ERR, "Error moving in journal: %m");
+            return EXIT_FAILURE;
+        }
+        pw[POLL_FD_JOURNAL].fd = sd_journal_get_fd(j);
+        pw[POLL_FD_JOURNAL].events = POLLIN;
+    } else {
+        logw(logh, LOG_DEBUG, "Not monitoring journal");
+        if (tf_cnt == 0) {
+            logw(logh, LOG_ERR, "Nothing to monitor");
+            return EXIT_FAILURE;
+        }
+        pw[POLL_FD_JOURNAL].fd = -1;
+    }
+#endif
+
+    resets  = expire_list_init(NULL);
+    expires = expire_list_init(expire_cmp);
+
     char inotify_buf[ 100 * (sizeof(struct inotify_event) + NAME_MAX + 1)];
-    // exit_flag =1 ;
+
     while (!exit_flag) {
-        logw(logh, LOG_DEBUG, "Monitors: %u/%u sleeping %d milliseconds", tf_cnt_exist, tf_cnt_total, timeout);
-        int pollret = poll(&pollwatch, 1, timeout);
+        logw(logh, LOG_DEBUG, "Monitors: %u/%u sleeping %d milliseconds", tf_cnt_exist, tf_cnt, timeout);
+        int pollret = poll(pw, POLL_FD_CNT, timeout);
 
         // error or signal received
         if (pollret < 0) {
@@ -599,18 +585,18 @@ int main(int argc, char **argv) {
             logw(logh, LOG_DEBUG, "Running expires");
             expire_list_run(expires, expires_run);
 
-            if (tf_cnt_exist < tf_cnt_total) {
+            if (tf_cnt_exist < tf_cnt) {
                 // check if file has been created
-                for (tfile *tf = tfs; tf->name; tf++) {
-                    if (tf->watchfd == -1) {
-                        tf->watchfd = inotify_add_watch(pollwatch.fd, tf->name, IN_MODIFY|IN_IGNORED);
-                        if (tf->watchfd == -1) {
-                            logw(logh, LOG_DEBUG, "%s not monitored: %m", tf->name);
+                for (unsigned int i = 0; i < tf_cnt; i++) {
+                    if (tf[i]->watchfd == -1) {
+                        tf[i]->watchfd = inotify_add_watch(pw[0].fd, tf[i]->name, IN_MODIFY|IN_IGNORED);
+                        if (tf[i]->watchfd == -1) {
+                            logw(logh, LOG_DEBUG, "%s not monitored: %m", tf[i]->name);
                         } else {
                             tf_cnt_exist++;
-                            logw(logh, LOG_DEBUG, "%s monitoring from now", tf->name);
-                            tf->pos = 0;
-                            tail_lines(tf, proc_line);
+                            logw(logh, LOG_DEBUG, "%s monitoring from now", tf[i]->name);
+                            // tf->pos = 0;
+                            tail_lines(tf[i], proc_line);
                         }
                     }
                 }
@@ -621,40 +607,56 @@ int main(int argc, char **argv) {
 
 
         if (pollret > 0) {
-            // inotify event arrived
-            ssize_t len = read(pollwatch.fd, inotify_buf, sizeof(inotify_buf));
-            if (len < 0) {
-                if (errno == EINTR || errno == EAGAIN) {
-                    continue;
+            // inotify event or something new in journal
+
+            if (pw[POLL_FD_INOTIFY].revents) {
+                if (pw[POLL_FD_INOTIFY].revents & POLLIN) {
+                    ssize_t len = read(pw[0].fd, inotify_buf, sizeof(inotify_buf));
+                    if (len < 0) {
+                        if (errno == EINTR || errno == EAGAIN) {
+                            continue;
+                        } else {
+                            logw(logh, LOG_ERR, "Error reading inotify event: %m");
+                            exit(1);
+                        }
+                    }
+                    for (int e = 0; e < len; ) {
+                        struct inotify_event *ev = (struct inotify_event *) &inotify_buf[e];
+                        logw(logh, LOG_DEBUG, "Inotify event pos %d/%ld: %#08x", e, len, ev->mask);
+
+                        // find out which monitored file received the event
+                        tfile *cf = NULL;
+                        for (unsigned int fi = 0; fi < tf_cnt; fi++) {
+                            if (tf[fi]->watchfd == ev->wd) {
+                                cf = tf[fi];
+                                logw(logh, LOG_DEBUG, "%s got event", cf->name);
+
+                                if (ev->mask & IN_MODIFY)
+                                    tail_lines(cf, proc_line);
+
+                                if (ev->mask & IN_IGNORED) {
+                                    logw(logh, LOG_DEBUG, "%s deleted", cf->name);
+                                    cf->watchfd = -1;
+                                    tf_cnt_exist--;
+                                    if (timeout < 0)
+                                        timeout = LOG_CREATE_SCAN_INTERVAL;
+                                }
+                            }
+                        }
+
+                        e += sizeof(struct inotify_event) + ev->len;
+                    }
                 } else {
-                    logw(logh, LOG_ERR, "Error reading inotify event: %m");
-                    exit(1);
+                    logw(logh, LOG_ERR, "Error polling inotify: %s", strerror(errno));
                 }
             }
-            for (int e = 0; e < len; ) {
-                struct inotify_event *ev = (struct inotify_event *) &inotify_buf[e];
-                logw(logh, LOG_DEBUG, "Inotify event pos %d/%ld: %#08x", e, len, ev->mask);
-
-                // find out which monitored file received the event
-                tfile *tf;
-                for (tf = tfs; tf->name; tf++)
-                    if (tf->watchfd == ev->wd)
-                        break;
-                assert(tf->name != NULL);
-                logw(logh, LOG_DEBUG, "%s got event", tf->name);
-
-                if (ev->mask & IN_MODIFY)
-                    tail_lines(tf, proc_line);
-
-                if (ev->mask & IN_IGNORED) {
-                    logw(logh, LOG_DEBUG, "%s deleted", tf->name);
-                    tf->watchfd = -1;
-                    tf_cnt_exist--;
-                    if (timeout < 0)
-                        timeout = LOG_CREATE_SCAN_INTERVAL;
-                }
-                e += sizeof(struct inotify_event) + ev->len;
+#ifdef SYSTEMD
+            if (pw[POLL_FD_JOURNAL].revents) {
+                tail_journal(j);
+            } else {
+                logw(logh, LOG_ERR, "Error polling journal: %s", strerror(errno));
             }
+#endif
         }
 
         // update poll() timeout
@@ -681,19 +683,154 @@ int main(int argc, char **argv) {
             timeout *= 1000;
 
         // if we are waiting for a log file to be created, and the timeout is smaller than the log_create_scan_interval, use that instead
-        if (tf_cnt_exist < tf_cnt_total && timeout * 1000 < LOG_CREATE_SCAN_INTERVAL)
+        if (tf_cnt_exist < tf_cnt && timeout * 1000 < LOG_CREATE_SCAN_INTERVAL)
             timeout = LOG_CREATE_SCAN_INTERVAL;
     }
 
-    dprint("freeing memory");
-    expire_list_free(resets, reset_free);
-    expire_list_free(expires, expires_run);
-
-    log_close(logh);
-    free_config();
-    dprint("freeing tables: %p\n", pcre_tables);
-    if (pcre_tables)
-        pcre_free((void *)pcre_tables);
+#ifdef SYSTEMD
+    if (j != NULL)
+        sd_journal_close(j);
+#endif
 
     return EXIT_SUCCESS;
+}
+
+// signal handler to stop react_main()
+void react_stop(int sig) {
+    logw(logh, LOG_NOTICE, "Received signal %d, exiting", sig);
+    exit_flag = 1;
+}
+
+void free_re(re *re) {
+    dprint("    freeing RE %s\n", re->str);
+    free(re->str);
+    if (re->studied)
+        pcre_free_study(re->studied);
+    if (re->re)
+        pcre_free(re->re);
+    if (re->cmd) {
+        dprint("freeing cmd");
+        for (unsigned int ci = 0; ci < re->cmd->cnt; ci++)
+            pcre_subst_free(re->cmd->args[ci]);
+        free(re->cmd->args);
+        free(re->cmd);
+    }
+    if (re->reset_cmd) {
+        dprint("freeing reset_cmd");
+        for (unsigned int i = 0; i < re->reset_cmd->cnt; i++)
+            pcre_subst_free(re->reset_cmd->args[i]);
+        free(re->reset_cmd->args);
+        free(re->reset_cmd);
+    }
+    if (re->key)
+        pcre_subst_free(re->key);
+    if (re->hitlist)
+        avl_destroy(re->hitlist, free_keyhits);
+    free(re);
+}
+
+void free_config() {
+    if (cfg.pidfile)
+        free(cfg.pidfile);
+    if (cfg.logfile)
+        free(cfg.logfile);
+    if (cfg.logprefix)
+        free(cfg.logprefix);
+
+    // free tailed files
+    for (unsigned int fi = 0; fi < tf_cnt; fi++) {
+        dprint("freeing TF %s", tf[fi]->name);
+        free(tf[fi]->name);
+        for (unsigned int ri = 0; ri < tf[fi]->re_cnt; ri++)
+            free_re(tf[fi]->re[ri]);
+        free(tf[fi]->re);
+        free(tf[fi]);
+    }
+    dprint("freeing tf: %p", tf);
+    free(tf);
+
+#ifdef SYSTEMD
+    // free tailed journals
+    for (unsigned int ji = 0; ji < tj_cnt; ji++) {
+        dprint("freeing TJ %u", ji);
+        for (unsigned int jfi = 0; jfi < tj[ji]->filters->cnt; jfi++) {
+            dprint("freeing TJ %u filter field %u: %p", ji, jfi, tj[ji]->filters->fields[jfi]);
+            free(tj[ji]->filters->fields[jfi]);
+            dprint("freeing TJ %u filter value %u: %p", ji, jfi, tj[ji]->filters->values[jfi]);
+            free(tj[ji]->filters->values[jfi]);
+        }
+        dprint("freeing TJ %u filters: %p", ji, tj[ji]->filters);
+        free(tj[ji]->filters->fields);
+        free(tj[ji]->filters->values);
+        free(tj[ji]->filters);
+        for (unsigned int ri = 0; ri < tj[ji]->re_cnt; ri++)
+            free_re(tj[ji]->re[ri]);
+        dprint("freeing TJ %u: %p", ji, tj[ji]);
+        free(tj[ji]->re);
+        free(tj[ji]);
+    }
+    dprint("freeing tj: %p", tj);
+    free(tj);
+#endif
+}
+
+int main(int argc, char **argv) {
+    dprint_init();
+    char *config = DEFAULT_CONFIG;
+    int ch;
+    int ret = 0;
+
+    static const struct option longopts[] = {
+        { "config",       required_argument, 0, 'c' },
+        { "pidfile",      required_argument, 0, 'p' },
+        { "statefile",    required_argument, 0, 's' },
+        { "version",      no_argument,       0, 'V' },
+        { "help",         no_argument,       0, 'h' },
+        { NULL, 0, 0, 0 }
+    };
+
+    while ((ch = getopt_long(argc, argv, "c:Vh", longopts, NULL)) != -1)
+        switch((char)ch) {
+            case 'c':
+                config = optarg;
+                break;
+            case 'V':
+                printf("reactd version %s\n", VERSION);
+                exit(0);
+            case 'h':
+                usage(stdout);
+            default:
+                usage(stderr);
+        }
+
+        // must be called before parse_config()
+        pcre_tables = (unsigned char *)pcre_maketables();
+
+        memset(&cfg, 0, sizeof(cfg));
+        ret |= parse_config(config);
+
+        if (ret == 0) {
+            logh = log_open(cfg.logdst, cfg.loglevel, cfg.logprefix, cfg.logfile);
+            signal(SIGCHLD, SIG_IGN);
+            signal(SIGINT,  react_stop);
+            signal(SIGTERM, react_stop);
+            ret |= react_main();
+            signal(SIGTERM, SIG_DFL);
+            signal(SIGINT,  SIG_DFL);
+            signal(SIGCHLD, SIG_DFL);
+            log_close(logh);
+        }
+
+        free_config();
+
+        dprint("freeing memory");
+        if (resets)
+            expire_list_free(resets, reset_free);
+        if (expires)
+            expire_list_free(expires, expires_run);
+
+        if (pcre_tables)
+            pcre_free((void *)pcre_tables);
+
+    return ret;
 }
