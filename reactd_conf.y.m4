@@ -1,9 +1,10 @@
-dnl This file is processed to m4 to generate bison config parser
-dnl
-dnl use utf8 Japanese quotes for m4 quotes
-changequote(「,」)
-dnl use utf8 black square for m4 comments
-changecom(`■')
+/*
+ * This is processed through m4 to generate a bison parser for config files
+ *
+ * Change the default characters for m4 quotes and disable comments
+ * so that they don't interfere with bison:
+ * changequote(「,」) changecom
+ */
 /*
  * bison input to generate reactd configuration file parser
  */

@@ -1,11 +1,9 @@
-dnl This file is processed to m4 to generate flex lexical analyzer
-dnl
-dnl use utf8 Japanese quotes for m4 quotes
-changequote(「,」)
-dnl use utf8 black square for m4 comments
-changecom(`■')
 /*
- * flex input to generate lexical analyzer for configuration file parser
+ * This is processed through m4 to generate a flex analyzer to parse config files
+ *
+ * Change the default characters for m4 quotes and disable comments
+ * so that they don't interfere with bison:
+ * changequote(「,」) changecom
  */
 
 %{
@@ -79,7 +77,7 @@ timeout    { return TIMEOUT_KEY; }
     return STRING;
 }
 
-[^ "\n]([^ "\n\\]|\\[ "])*     { // unquoted string, spaces and quotes are allowed if preceded by escape
+[^ ="\\=\{\}\n]([^ ="\\=\{\}\n]|\\[ ="\\=\{\}])*     { // unquoted string: must not start with special characters occurring in other places, after that they can appear if escaped
     yylval.sval = strdup(yytext);
     return STRING;
 }
@@ -92,7 +90,7 @@ timeout    { return TIMEOUT_KEY; }
 }
 
 . {
-    printf("Unrecognized token in line %u: ->%s<-\n", yylineno, yytext);
+    fprintf(stderr, "Unrecognized token in line %u: ->%s<-\n", yylineno, yytext);
     yyterminate();
 }
 
