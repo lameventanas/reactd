@@ -25,21 +25,19 @@
 #include "reactd.h"
 
 // from reactd_conf.y
-extern tfile **tf;
-extern unsigned int tf_cnt;
+tfile **tf = NULL;       // tailed file configs, populated by parse_config()
+unsigned int tf_cnt = 0; // number of items in tf, populated by parse_config()
 #ifdef SYSTEMD
-extern tjournal **tj;
-extern unsigned int tj_cnt;
+tjournal **tj = NULL;    // tailed journal configs, populated by parse_config()
+unsigned int tj_cnt = 0; // number of items in tj, populated by parse_config()
 #endif
-extern tglobal_cfg cfg;
+tglobal_cfg cfg;         // global config settings, populated by parse_config()
 
 unsigned char *pcre_tables = NULL;
 
 log_h *logh; // log handle
-texpire_list *resets = NULL; // keep track of pending resets (this is shared among all files/res)
+texpire_list *resets = NULL;  // keep track of pending resets (this is shared among all files/res)
 texpire_list *expires = NULL; // keep track of hits in file->res->hitlist to expire if no new hits are recorded in INTERVAL period (we store keyhits *)
-
-// int timeout = -1; // poll timeout for all files, -1 if all monitored files exist, otherwise LOG_CREATE_SCAN_INTERVAL
 
 static volatile sig_atomic_t exit_flag = 0;
 
@@ -61,7 +59,6 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 
     exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
-
 
 #ifdef DEBUG
 
@@ -88,27 +85,32 @@ void print_time(void *t) {
 }
 
 void react_debug_re(re *re) {
-    dprint("    Hitlist: %u items", avl_count(re->hitlist));
-    struct avl_traverser tr;
+    dprint("    RE: %s", re->str);
+    if (re->hitlist) {
+        dprint("    Hitlist: %u items", avl_count(re->hitlist));
+        struct avl_traverser tr;
 
-    unsigned int i = 0;
-    avl_t_init(&tr, re->hitlist);
+        unsigned int i = 0;
+        avl_t_init(&tr, re->hitlist);
 
-    for (keyhits *n = avl_t_first(&tr, re->hitlist); n != NULL; n = avl_t_next(&tr)) {
-        char t_old[30];
-        char t_new[30];
-        my_ctime(ring_oldest(n->hits), t_old);
-        my_ctime(ring_newest(n->hits), t_new);
+        for (keyhits *n = avl_t_first(&tr, re->hitlist); n != NULL; n = avl_t_next(&tr)) {
+            char t_old[30];
+            char t_new[30];
+            my_ctime(ring_oldest(n->hits), t_old);
+            my_ctime(ring_newest(n->hits), t_new);
 
-        dprint("        %2u key: %-15s hits: %u/%u first: %s last: %s",
-               ++i,
-               n->key,
-               ring_count(n->hits),
-               ring_size(n->hits),
-               t_old,
-               t_new
-        );
-        // ring_print(n->hits, print_time);
+            dprint("        %2u key: %-15s hits: %u/%u first: %s last: %s",
+                ++i,
+                n->key,
+                ring_count(n->hits),
+                ring_size(n->hits),
+                t_old,
+                t_new
+            );
+            // ring_print(n->hits, print_time);
+        }
+    } else {
+        dprint("    No trigger configured");
     }
 }
 void react_debug() {
@@ -116,7 +118,7 @@ void react_debug() {
     for (unsigned int fi = 0; fi < tf_cnt; fi++) {
         dprint("TF %u: %s", fi, tf[fi]->name);
         for (unsigned int ri = 0; ri < tf[fi]->re_cnt; ri++) {
-            dprint("    RE %u: %s", ri, tf[fi]->re[ri]->str);
+            dprint("    RE %u:", ri);
             react_debug_re(tf[fi]->re[ri]);
         }
     }
@@ -125,13 +127,12 @@ void react_debug() {
     for (unsigned int ji = 0; ji < tj_cnt; ji++) {
         dprint("TJ %u", ji);
         for (unsigned int ri = 0; ri < tj[ji]->re_cnt; ri++) {
-            dprint("    RE %u: %s", ri, tj[ji]->re[ri]->str);
+            dprint("    RE %u:", ri);
             react_debug_re(tj[ji]->re[ri]);
         }
     }
 #endif
 
-    // print expire list
     dprint("Expire items:");
     unsigned int i = 0;
     for (texpire_item *n = expires->items; n; n = n->next) {
@@ -147,20 +148,27 @@ void react_debug() {
         treset *reset = n->obj;
         dprint("    %u: source: %s key: %s t: %s", i++, reset->source, reset->key, ts);
     }
-
-    // print reset list
 }
 #endif
 
 int run_prog(char **argv) {
     pid_t pid = fork();
     if (pid == 0) {
-        // if (daemon(0, 0) < 0) {
         if (daemon(0, 1) < 0) {
             logw(logh, LOG_ERR, "daemon: %m");
             exit(1);
         }
-        logw(logh, LOG_DEBUG, "Running %s", argv[0]);
+        if (log_above(logh, LOG_DEBUG)) {
+            char *cmd = calloc(1, sizeof(char));
+            for (unsigned int i = 0; argv[i]; i++) {
+                cmd = realloc(cmd, strlen(cmd) + strlen(argv[i]) + 2);
+                strcat(cmd, argv[i]);
+                if (argv[i+1] != NULL)
+                    strcat(cmd, " ");
+            }
+            logw(logh, LOG_DEBUG, "Running: %s", cmd);
+            free(cmd);
+        }
         execv(argv[0], argv);
         logw(logh, LOG_ERR, "Could not run %s: %m", argv[0]);
         exit(1);
@@ -255,10 +263,10 @@ void expires_run(void *expire) {
 void proc_re(char *source, re *re, char *msg) {
     int *filter_matches = malloc(3 * re->capture_cnt * sizeof(int));
 
-    logw(logh, LOG_DEBUG, "matching %s re %s against: ->%s<-", source, re->str, msg);
+    logw(logh, LOG_DEBUG, "Matching %s RE ->%s<- text: ->%s<-", source, re->str, msg);
     int re_ret = pcre_exec(re->re, re->studied, msg, strlen(msg), 0, 0, filter_matches, 3 * re->capture_cnt);
     if (re_ret > 0) {
-        logw(logh, LOG_INFO, "%s matched RE %s", source, re->str);
+        logw(logh, LOG_INFO, "Text in %s matched RE ->%s<-", source, re->str);
 
         int run = 0;
         char *key = NULL;
@@ -266,12 +274,12 @@ void proc_re(char *source, re *re, char *msg) {
 
         if (re->key != NULL) {
             key = pcre_subst_replace(msg, re->key, filter_matches, 3 * re->capture_cnt, re_ret, 0);
-            logw(logh, LOG_DEBUG, "Got key: %s 0x%X", key, key);
+            logw(logh, LOG_DEBUG, "Got key: %s", key);
         }
 
         // if we have to keep track of these hits (eg: we have a key and trigger)
         if (re->trigger_cnt > 0) {
-            logw(logh, LOG_DEBUG, "Checking trigger condition for key %s", key);
+            logw(logh, LOG_DEBUG, "Checking trigger condition for key: %s", key);
             texpire *expire = malloc(sizeof(texpire));
             expire->re = re;
 
@@ -313,17 +321,17 @@ void proc_re(char *source, re *re, char *msg) {
                 }
             }
         } else {
-            logw(logh, LOG_DEBUG, "Running command without checking trigger condition");
+            // logw(logh, LOG_DEBUG, "Running command without trigger");
             run = 1;
         }
 
         if (run) {
             if (key) {
-                logw(logh, LOG_DEBUG, "Running command for key %s", key);
+                // logw(logh, LOG_DEBUG, "Running command for key %s", key);
                 setenv("REACT_KEY", key, 1);
-            } else {
+            } /* else {
                 logw(logh, LOG_DEBUG, "Running command without key");
-            }
+            } */
             setenv("REACT_SOURCE", source, 1);
 
             for (unsigned int i = 0; i < re_ret; i++) {
@@ -589,7 +597,7 @@ int react_main() {
     struct pollfd pw[POLL_FD_CNT]; // used to store: 0:inotify and 1:journal file descriptors and to poll for read/delete events
     memset(&pw, 0, POLL_FD_CNT*sizeof(struct pollfd));
 
-    logw(logh, LOG_INFO, "Starting reactd");
+    logw(logh, LOG_INFO, "Starting reactd, log level: %s", loglevel_str(logh->level));
 
     if (tf_cnt > 0) {
         // Initialize global inotify fd and poll structure
@@ -661,8 +669,10 @@ int react_main() {
 
     while (!exit_flag) {
 #ifdef DEBUG
+        /*
         if (log_above(logh, LOG_DEBUG))
             react_debug();
+        */
 #endif
 
         if (log_above(logh, LOG_DEBUG))
@@ -759,11 +769,8 @@ int react_main() {
                 }
             }
 #ifdef SYSTEMD
-            if (pw[POLL_FD_JOURNAL].revents) {
+            if (pw[POLL_FD_JOURNAL].revents & (POLLIN|POLLRDNORM) )
                 tail_journal(j);
-            } else {
-                logw(logh, LOG_ERR, "Error polling journal: %s", strerror(errno));
-            }
 #endif
         }
 
@@ -773,6 +780,7 @@ int react_main() {
         time_t t_expires = expire_list_next_expiracy(expires);
         time_t t_resets  = expire_list_next_expiracy(resets);
 
+#ifdef DEBUG
         if (log_above(logh, LOG_DEBUG)) {
             if (t_expires < 0)
                 logw(logh, LOG_DEBUG, "Next hit expiracy: not scheduled");
@@ -789,6 +797,7 @@ int react_main() {
                 logw(logh, LOG_DEBUG, "Next reset run: %s", s);
             }
         }
+#endif
 
         if (t_expires > 0 || t_resets > 0) {
             if (t_expires > 0 && t_resets > 0) {
@@ -924,8 +933,8 @@ int main(int argc, char **argv) {
     memset(&cfg, 0, sizeof(cfg));
 
     // will only be set by parse_config if they are not set by cmd args
-    cfg.logdst = -1;
-    cfg.loglevel = -1;
+    cfg.logdst   = LOG_INVALID;
+    cfg.loglevel = LOG_INVALID;
 
     while ((ch = getopt_long(argc, argv, "c:tbp:d:o:l:Vh", longopts, NULL)) != -1)
         switch((char)ch) {
@@ -981,9 +990,9 @@ int main(int argc, char **argv) {
 
     // args not set via command-line will be taken from config or defaults
     if (arg_logdst == -1)
-        arg_logdst = (cfg.logdst != 0) ? cfg.logdst : DEFAULT_LOGDST;
+        arg_logdst = (cfg.logdst != LOG_INVALID) ? cfg.logdst : DEFAULT_LOGDST;
     if (arg_loglevel == -1)
-        arg_loglevel = (cfg.loglevel != 0) ? cfg.loglevel : DEFAULT_LOGLEVEL;
+        arg_loglevel = (cfg.loglevel != LOG_INVALID) ? cfg.loglevel : DEFAULT_LOGLEVEL;
     if (arg_logdst == LOG_TO_FILE && arg_logfile == NULL)
         if (cfg.logfile)
             arg_logfile = cfg.logfile;
@@ -995,7 +1004,7 @@ int main(int argc, char **argv) {
 
     if (ret == 0 && !arg_test) {
         logh = log_open(arg_logdst, arg_loglevel, cfg.logprefix, arg_logfile);
-        dprint("Logging: %s\nLoglevel: %s\n", logdst_str(logh->dst), loglevel_str(logh->level));
+        dprint("Logging to %s with level %s", logdst_str(logh->dst), loglevel_str(logh->level));
 
         if (arg_background) {
             if (0 > daemon(0, 1)) {
@@ -1020,7 +1029,9 @@ int main(int argc, char **argv) {
             signal(SIGCHLD, SIG_IGN);
             signal(SIGINT,  react_stop);
             signal(SIGTERM, react_stop);
+#ifdef DEBUG
             signal(SIGUSR1, react_debug);
+#endif
             ret |= react_main();
             signal(SIGUSR1, SIG_DFL);
             signal(SIGTERM, SIG_DFL);

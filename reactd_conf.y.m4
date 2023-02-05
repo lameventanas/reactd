@@ -5,9 +5,6 @@
  * so that they don't interfere with bison:
  * changequote(「,」) changecom
  */
-/*
- * bison input to generate reactd configuration file parser
- */
 
 %{
 #include <stdlib.h>
@@ -30,10 +27,10 @@ extern int linenr;
 void yyerror(const char *s);
 int yydebug = 1;
 
-tglobal_cfg cfg; // global config settings, populated by parse_config() and used elsewhere via extern
+extern tglobal_cfg cfg; // global config settings, populated by parse_config()
 
-tfile **tf; // tailed file configs, populated by parse_config() and used elsewhere via extern
-unsigned int tf_cnt = 0; // number of tailed file configs, populated by parse_config() and used elsewhere via extern
+extern tfile **tf;          // tailed file configs, populated by parse_config()
+extern unsigned int tf_cnt; // number of items in tf, populated by parse_config()
 
 tcmd *cc  = NULL; // current command being parsed
 re *cr    = NULL; // current RE being parsed
@@ -48,8 +45,8 @@ typedef struct {
 } tf_cfg_node;
 
 ifdef(「SYSTEMD」,「
-tjournal **tj; // tailed journal configs, populated by parse_config() and used elsewhere via extern
-unsigned int tj_cnt = 0; // number of tailed journal configs, populated by parse_config() and used elsewhere via extern
+extern tjournal **tj;       // tailed journal configs, populated by parse_config()
+extern unsigned int tj_cnt; // number of items in tj, populated by parse_config()
 
 tj_filters *cjf = NULL; // current journal filters
 tjournal *cj    = NULL; // current journal section config being parsed
@@ -529,6 +526,7 @@ char *cmd_str(tcmd *cmd) {
 }
 
 void print_re(re *re) {
+    dprint("\t\t\tre: %p", re);
     dprint("\t\t\tstr: %s", re->str);
     if (re->cmd) {
         char *tmp = cmd_str(re->cmd);
@@ -549,6 +547,10 @@ void print_re(re *re) {
         dprint("\t\t\treset_cmd: %s", tmp);
         free(tmp);
     }
+    if (re->hitlist)
+        dprint("\t\t\thitlist items: %u", avl_count(re->hitlist));
+    else
+        dprint("\t\t\tno trigger configured");
 }
 
 ifdef(「SYSTEMD」,「
