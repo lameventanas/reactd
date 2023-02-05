@@ -109,10 +109,6 @@ void *ring_get_oldest(ring *ring, int remove) {
     return ret;
 }
 
-unsigned int ring_count(ring *ring) {
-    return ring->count;
-}
-
 int ring_resize(ring *ring, unsigned int size) {
 #ifdef DEBUG_RING
     printf("ring_resize %u -> %u (before):\n", ring->size, size);

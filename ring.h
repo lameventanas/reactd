@@ -30,15 +30,22 @@ void *ring_get_newest(ring *ring, int remove);
 // returns oldest value
 void *ring_get_oldest(ring *ring, int remove);
 
-// returns number of nodes in ring
-unsigned int ring_count(ring *ring);
-
 // resizes ring
 // returns true if successful (can't resize below current item count)
 int ring_resize(ring *ring, unsigned int size);
 
+// returns number of nodes in ring
+#define ring_count(r) r->count
+
 // get ring size
-#define ring_get_size(r) r->size
+#define ring_size(r) r->size
+
+// get first value
+#define ring_oldest(r) (r->count > 0 ? r->values[r->first] : NULL)
+
+// get last value
+#define ring_newest(r) (r->count > 0 ? r->values[(r->first + r->count - 1) % r->size ] : NULL )
+
 
 #ifdef DEBUG_RING
 // sets default callback function used to print values, for debugging

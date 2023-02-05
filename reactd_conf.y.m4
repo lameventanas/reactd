@@ -154,6 +154,7 @@ char *unescape(char *s) {
 
 reactd:
     options body
+    | body
     ;
 
 options:
@@ -166,11 +167,32 @@ option_lines:
     ;
 
 option_line:
-    PIDFILE_KEY     '=' STRING   { unescape($3); cfg.pidfile   = $3; }
-    | LOGDST_KEY    '=' LOGDST   { cfg.logdst = $3; }
-    | LOGFILE_KEY   '=' STRING   { unescape($3); cfg.logfile   = $3; }
+    PIDFILE_KEY     '=' STRING   {
+                            // use it, unless set already from command-line
+                            if (cfg.pidfile == NULL) {
+                                unescape($3);
+                                cfg.pidfile = $3;
+                            } else {
+                                free($3);
+                            }
+                        }
+    | LOGDST_KEY    '=' LOGDST   {
+                            if (cfg.logdst < 0)
+                                cfg.logdst = $3;
+                        }
+    | LOGFILE_KEY   '=' STRING   {
+                            if (cfg.logfile == NULL) {
+                                unescape($3);
+                                cfg.logfile = $3;
+                            } else  {
+                                free($3);
+                            }
+                        }
     | LOGPREFIX_KEY '=' STRING   { unescape($3); cfg.logprefix = $3; }
-    | LOGLEVEL_KEY  '=' LOGLEVEL { cfg.loglevel  = $3; }
+    | LOGLEVEL_KEY  '=' LOGLEVEL {
+                            if (cfg.loglevel < 0)
+                                cfg.loglevel  = $3;
+                        }
     ;
 
 body:
@@ -451,9 +473,10 @@ reset_option:
 
 %%
 
+/*
 void yyerror(const char *s) {
     dprint("Parse error: %s", s);
-}
+} */
 
 // callback compare for avl tree of filenames
 int tf_cfg_cmp(const void *a, const void *b, void *param) {

@@ -70,9 +70,7 @@ void log_close(log_h *logh) {
     free(logh);
 }
 
-int logdst_int(char *dst, int fallback) {
-    if (dst == NULL)
-        return fallback;
+int logdst_int(char *dst) {
     if (!strcmp(dst, "syslog")) {
         return LOG_TO_SYSLOG;
     } else     if (!strcmp(dst, "file")) {
@@ -82,15 +80,15 @@ int logdst_int(char *dst, int fallback) {
     } else     if (!strcmp(dst, "stderr")) {
         return LOG_TO_STDERR;
     }
-    return fallback;
+    return LOG_INVALID;
 }
 
 char *logdst_str(int dst) {
     return log_destinations[dst];
 }
 
-int loglevel_int(char *level, int fallback) {
-    if (!strcmp(level, "emerg")) {
+int loglevel_int(char *level) {
+    if (!strcmp(level, "emerg") || !strcmp(level, "emergency")) {
         return LOG_EMERG;
     } else     if (!strcmp(level, "alert")) {
         return LOG_ALERT;
@@ -107,7 +105,7 @@ int loglevel_int(char *level, int fallback) {
     } else     if (!strcmp(level, "debug")) {
         return LOG_DEBUG;
     }
-    return fallback;
+    return LOG_INVALID;
 }
 
 char *loglevel_str(int level) {

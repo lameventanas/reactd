@@ -4,6 +4,9 @@
 #include <syslog.h>
 #include <stdio.h>
 
+// invalid option
+#define LOG_INVALID -1
+
 // default log facility:
 #define LOG_FACILITY LOG_DAEMON
 
@@ -46,15 +49,21 @@ void log_write(log_h *logh, int level, const char *fmt, ...);
 void log_close(log_h *logh);
 
 // returns dst as int
-int logdst_int(char *dst, int fallback);
+int logdst_int(char *dst);
 
 // returns dst as string
 char *logdst_str(int dst);
 
 // returns loglevel as int
-int loglevel_int(char *level, int fallback);
+int loglevel_int(char *level);
 
 // returns loglevel as string
 char *loglevel_str(int level);
+
+// returns true if would log this level
+#define log_above(logh, log_level) (logh->level) >= log_level
+// use like this:
+// if (log_above(logh, LOG_DEBUG))
+//    expensive_debug_function()
 
 #endif

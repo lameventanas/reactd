@@ -1,13 +1,13 @@
 #ifndef REACTD_H
 #define REACTD_H
-#define DEFAULT_CONFIG "/etc/reactd.conf"
-#define DEFAULT_PIDFILE "/var/run/reactd/reactd.pid"
-#define DEFAULT_STATEFILE "/var/run/reactd/reactd.db"
 
 #define VERSION "0.1"
 #define PROGRAM_NAME "reactd"
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
+
+#define DEFAULT_LOGDST LOG_TO_SYSLOG
+#define DEFAULT_LOGLEVEL LOG_INFO
 
 #include <pcre.h>
 
@@ -119,8 +119,6 @@ typedef struct {
 } texpire;
 
 typedef struct {
-    unsigned int version_major;
-    unsigned int version_minor;
     char *pidfile;
     int logdst;
     char *logfile;

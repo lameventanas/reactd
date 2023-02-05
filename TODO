@@ -1,3 +1,5 @@
+- add functional test
+- improve error messages on errors in config file
 - add ipset() functionality directly (optional at compile time)
 - Create test unit for subst library
 - Improve dprint() to print times in human-readable form, if possible with milliseconds

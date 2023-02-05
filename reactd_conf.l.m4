@@ -11,13 +11,21 @@
 #include "log.h"
 #include "debug.h"
 
+void yyerror(const char *s);
+
 ;
 %}
 %option noyywrap noinput nounput yylineno
 
 %%
 #.*        ; // ignore comments
+
+ifdef(DEBUG,「
+[ \t\n]+    { printf("newline\n");
+」,「
 [ \t\n]+
+」)
+
 \.          { return DOT; }
 [\{\},=]    { return yytext[0]; } // return single characters that are used in the config file
 [1-9][0-9]* { yylval.ival = atoi(yytext); return POSITIVE_INT; }
@@ -31,12 +39,12 @@ logprefix  { return LOGPREFIX_KEY; }
 loglevel   { return LOGLEVEL_KEY;  }
 
 (syslog|file|stdout|stderr) {
-    yylval.ival = logdst_int(yytext, LOG_TO_SYSLOG);
+    yylval.ival = logdst_int(yytext);
     return LOGDST;
 }
 
-(emergency|alert|critical|error|warning|notice|info|debug) {
-    yylval.ival = loglevel_int(yytext, 0);
+(emergency|emerg|alert|critical|crit|error|err|warning|warn|notice|info|debug) {
+    yylval.ival = loglevel_int(yytext);
     return LOGLEVEL;
 }
 
@@ -77,7 +85,7 @@ timeout    { return TIMEOUT_KEY; }
     return STRING;
 }
 
-[^ ="\\=\{\}\n]([^ ="\\=\{\}\n]|\\[ ="\\=\{\}])*     { // unquoted string: must not start with special characters occurring in other places, after that they can appear if escaped
+(\\[^\n][^ ="\\=\{\}\n]*|[^ ="\\=\{\}\n]([^ ="\\=\{\}\n]|\\[ ="\\=\{\}])*) { // unquoted string
     yylval.sval = strdup(yytext);
     return STRING;
 }
@@ -95,9 +103,7 @@ timeout    { return TIMEOUT_KEY; }
 }
 
 %%
-/*
-void yyerror(const char *s) {
-    printf("Error parsing line %d: %s\n---\n%s\n---", linenr, s, yytext);
-}
-*/
 
+void yyerror(const char *s) {
+    printf("Error parsing line %d: %s\n-->\n%s\n<--", yylineno, s, yytext);
+}

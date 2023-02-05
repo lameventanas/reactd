@@ -1,18 +1,23 @@
 #include <time.h>
 #include <stdarg.h>
 #include <stdio.h>
-
-static time_t dprint_time = 0;
-
-void dprint_init() {
-    dprint_time = time(NULL);
-}
+#include <string.h>
 
 void dprint(const char *fmt, ...) {
     va_list ap;
+    struct timespec tp;
 
-    va_start(ap, fmt);
-    fprintf(stderr, "%04ld: ", time(NULL) - dprint_time);
+    if (0 == clock_gettime(CLOCK_REALTIME, &tp)) {
+        struct tm tm;
+        char s[30]; // [yyyy-mm-dd hh:mm:ss.xxxxxx]
+        localtime_r(&tp.tv_sec, &tm);
+        strftime(s, sizeof(s), "[%F %T.", &tm);
+        // sprintf(s + strlen(s), "%03u] ", tp.tv_nsec / 1000000);
+        sprintf(s + strlen(s), "%06u] ", tp.tv_nsec / 1000);
+        fprintf(stderr, s);
+    }
+
+    va_start(ap,fmt);
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     va_end(ap);

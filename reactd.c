@@ -49,14 +49,108 @@ static void __attribute__ ((__noreturn__)) usage(FILE *out)
 
     fprintf(out,
         "\nOptions:\n"
-        " -c, --config FILE      configuration file (default: %s)\n"
-        " -p, --pidfile FILE     pid file (default: %s)\n"
-        " -s, --statefile FILE   state file (default: %s)\n"
-        " -V, --version          output version information and exit\n"
-        " -h, --help             display this help and exit\n\n", DEFAULT_CONFIG, DEFAULT_PIDFILE, DEFAULT_STATEFILE);
+        " -c --config FILE    configuration file\n"
+        " -t --test           syntax test configuration file and exit\n"
+        " -p --pidfile FILE   pid file\n"
+        " -d --logdst         one of: syslog, file, stdout, stderr\n"
+        " -f --logfile        output file when logging to a file\n"
+        " -l --loglevel       one of: emerg, alert, crit, err, warn, notice, info, debug\n"
+        " -V --version        output version information and exit\n"
+        " -h --help           display this help and exit\n\n"
+    );
 
     exit(out == stderr ? EXIT_FAILURE : EXIT_SUCCESS);
 }
+
+
+#ifdef DEBUG
+
+// Like ctime(), but without the last newline
+// if dst is null, memory will be allocated for result and must be freed
+char *my_ctime(time_t *t, char *dst) {
+    if (dst == NULL)
+        dst = malloc(30);
+
+    if (*t < 0) {
+        strcpy(dst, "unknown");
+    } else {
+        struct tm tmp;
+        localtime_r(t, &tmp);
+        strftime(dst, 30, "%F %T", &tmp);
+    }
+    return dst;
+}
+
+void print_time(void *t) {
+    char s[30];
+    my_ctime(t, s);
+    printf("%d -> %s", *(time_t *)t, s);
+}
+
+void react_debug_re(re *re) {
+    dprint("    Hitlist: %u items", avl_count(re->hitlist));
+    struct avl_traverser tr;
+
+    unsigned int i = 0;
+    avl_t_init(&tr, re->hitlist);
+
+    for (keyhits *n = avl_t_first(&tr, re->hitlist); n != NULL; n = avl_t_next(&tr)) {
+        char t_old[30];
+        char t_new[30];
+        my_ctime(ring_oldest(n->hits), t_old);
+        my_ctime(ring_newest(n->hits), t_new);
+
+        dprint("        %2u key: %-15s hits: %u/%u first: %s last: %s",
+               ++i,
+               n->key,
+               ring_count(n->hits),
+               ring_size(n->hits),
+               t_old,
+               t_new
+        );
+        // ring_print(n->hits, print_time);
+    }
+}
+void react_debug() {
+    // print status for tailed files
+    for (unsigned int fi = 0; fi < tf_cnt; fi++) {
+        dprint("TF %u: %s", fi, tf[fi]->name);
+        for (unsigned int ri = 0; ri < tf[fi]->re_cnt; ri++) {
+            dprint("    RE %u: %s", ri, tf[fi]->re[ri]->str);
+            react_debug_re(tf[fi]->re[ri]);
+        }
+    }
+    // print status for journal
+#ifdef SYSTEMD
+    for (unsigned int ji = 0; ji < tj_cnt; ji++) {
+        dprint("TJ %u", ji);
+        for (unsigned int ri = 0; ri < tj[ji]->re_cnt; ri++) {
+            dprint("    RE %u: %s", ri, tj[ji]->re[ri]->str);
+            react_debug_re(tj[ji]->re[ri]);
+        }
+    }
+#endif
+
+    // print expire list
+    dprint("Expire items:");
+    unsigned int i = 0;
+    for (texpire_item *n = expires->items; n; n = n->next) {
+        char ts[30];
+        texpire *expire = n->obj;
+        dprint("    %u: re: %s key: %s t: %s", i++, expire->re->str, expire->hits->key, ts);
+    }
+
+    dprint("Reset items:");
+    i = 0;
+    for (texpire_item *n = resets->items; n; n = n->next) {
+        char ts[30];
+        treset *reset = n->obj;
+        dprint("    %u: source: %s key: %s t: %s", i++, reset->source, reset->key, ts);
+    }
+
+    // print reset list
+}
+#endif
 
 int run_prog(char **argv) {
     pid_t pid = fork();
@@ -79,6 +173,7 @@ int run_prog(char **argv) {
 }
 
 void reset_free(void *reset) {
+    // NOTE: can't use log_write() here, logh might be closed
     for (unsigned int i = 0; ((treset *)reset)->argv[i]; i++)
         free(((treset *)reset)->argv[i]);
     free(((treset *)reset)->argv);
@@ -102,6 +197,7 @@ int keyhits_cmp(const void *a, const void *b, void *param) {
     return strcmp( ((keyhits *)a)->key, ((keyhits *)b)->key);
 }
 void free_keyhits(void *kh, void *param) {
+    dprint("Freeing keyhits for %s: key:%p hits:%p", ((keyhits *)kh)->key, ((keyhits *)kh)->key, ((keyhits *)kh)->hits);
     free(((keyhits *)kh)->key);
     ring_free(((keyhits *)kh)->hits, free);
 }
@@ -139,7 +235,8 @@ int expire_cmp(const void *a, const void *b) {
 // expire items in avl after the period time has passed and no further hits were detected
 // NOTE: nothing really runs, this only frees memory in the avl and the expire_list itself
 void expires_run(void *expire) {
-    logw(logh, LOG_DEBUG, "Expiring keyhits for RE %s key %s", ((texpire *)expire)->re->str, ((texpire *)expire)->hits->key);
+    // NOTE: can't use logh here, this might run after log_close()
+    dprint("Expiring keyhits for RE %s key: %s", ((texpire *)expire)->re->str, ((texpire *)expire)->hits->key);
 
     // remove reference from avl
     avl_delete(((texpire *)expire)->re->hitlist, ((texpire *)expire)->hits);
@@ -158,17 +255,17 @@ void expires_run(void *expire) {
 void proc_re(char *source, re *re, char *msg) {
     int *filter_matches = malloc(3 * re->capture_cnt * sizeof(int));
 
-    logw(logh, LOG_DEBUG, "matching %s re %s against %s", source, re->str, msg);
-    int filter_match_cnt = pcre_exec(re->re, re->studied, msg, strlen(msg), 0, 0, filter_matches, 3 * re->capture_cnt);
-    if (filter_match_cnt > 0) {
-        logw(logh, LOG_INFO, "%s matched RE %s count=%d", source, re->str, filter_match_cnt);
+    logw(logh, LOG_DEBUG, "matching %s re %s against: ->%s<-", source, re->str, msg);
+    int re_ret = pcre_exec(re->re, re->studied, msg, strlen(msg), 0, 0, filter_matches, 3 * re->capture_cnt);
+    if (re_ret > 0) {
+        logw(logh, LOG_INFO, "%s matched RE %s", source, re->str);
 
         int run = 0;
         char *key = NULL;
         keyhits *hits = NULL;
 
         if (re->key != NULL) {
-            key = pcre_subst_replace(msg, re->key, filter_matches, 3 * re->capture_cnt, filter_match_cnt, 0);
+            key = pcre_subst_replace(msg, re->key, filter_matches, 3 * re->capture_cnt, re_ret, 0);
             logw(logh, LOG_DEBUG, "Got key: %s 0x%X", key, key);
         }
 
@@ -211,7 +308,7 @@ void proc_re(char *source, re *re, char *msg) {
             if (ring_count(hits->hits) == re->trigger_cnt) {
                 time_t *hit_first = ring_get_oldest(hits->hits, 0);
                 if (*hit_time - *hit_first <= re->trigger_time) {
-                    logw(logh, LOG_DEBUG, "%s RE %s triggered by %u hits in %lu seconds", source, re->str, ring_get_size(hits->hits), *hit_time - *hit_first);
+                    logw(logh, LOG_DEBUG, "%s RE %s triggered by %u hits in %lu seconds", source, re->str, ring_size(hits->hits), *hit_time - *hit_first);
                     run = 1;
                 }
             }
@@ -229,7 +326,7 @@ void proc_re(char *source, re *re, char *msg) {
             }
             setenv("REACT_SOURCE", source, 1);
 
-            for (unsigned int i = 0; i < filter_match_cnt; i++) {
+            for (unsigned int i = 0; i < re_ret; i++) {
                 char *v = strndup(&msg[filter_matches[2*i]], filter_matches[2*i+1] - filter_matches[2*i]);
                 char k[7 + num_digits(i)];
                 sprintf(k, "REACT_%u", i);
@@ -241,7 +338,7 @@ void proc_re(char *source, re *re, char *msg) {
             char **argv = (char **)malloc((re->cmd->cnt + 1) * sizeof(char *));
             assert(argv != NULL);
             for (unsigned int i = 0; i < re->cmd->cnt; i++)
-                argv[i] = pcre_subst_replace(msg, re->cmd->args[i], filter_matches, 3 * re->capture_cnt, filter_match_cnt, 0);
+                argv[i] = pcre_subst_replace(msg, re->cmd->args[i], filter_matches, 3 * re->capture_cnt, re_ret, 0);
             argv[re->cmd->cnt] = NULL; // null-terminate for execv()
 
             if (key)
@@ -263,19 +360,19 @@ void proc_re(char *source, re *re, char *msg) {
                     reset->argv = (char **)malloc((re->reset_cmd->cnt + 1) * sizeof(char *)); // build argv for execv()
                     assert(reset->argv != NULL);
                     for (unsigned int i = 0; i < re->cmd->cnt; i++)
-                        reset->argv[i] = pcre_subst_replace(msg, re->reset_cmd->args[i], filter_matches, 3 * re->capture_cnt, filter_match_cnt, 0);
+                        reset->argv[i] = pcre_subst_replace(msg, re->reset_cmd->args[i], filter_matches, 3 * re->capture_cnt, re_ret, 0);
                     reset->argv[re->reset_cmd->cnt] = NULL; // null-terminate for execv()
 
                     // prepare env vars for reset command
                     reset->env = malloc(sizeof(tenv));
-                    reset->env->names = malloc(filter_match_cnt * sizeof(char **));
-                    reset->env->values = malloc(filter_match_cnt * sizeof(char **));
-                    for (unsigned int i = 0; i < filter_match_cnt; i++) {
+                    reset->env->names = malloc(re_ret * sizeof(char **));
+                    reset->env->values = malloc(re_ret * sizeof(char **));
+                    for (unsigned int i = 0; i < re_ret; i++) {
                         reset->env->names[i] = malloc(7 + num_digits(i));
                         sprintf(reset->env->names[i], "REACT_%u", i);
                         reset->env->values[i] = strndup(&msg[filter_matches[2*i]], filter_matches[2*i+1] - filter_matches[2*i]);
                     }
-                    reset->env->cnt = filter_match_cnt;
+                    reset->env->cnt = re_ret;
 
                     expire_list_add(resets, reset, re->reset_time);
 
@@ -287,7 +384,7 @@ void proc_re(char *source, re *re, char *msg) {
             unsetenv("REACT_SOURCE");
             if (key)
                 unsetenv("REACT_KEY");
-            for (unsigned int i = 0; i < filter_match_cnt; i++) {
+            for (unsigned int i = 0; i < re_ret; i++) {
                 char k[8];
                 snprintf(k, 8, "REACT_%u", i);
                 unsetenv(k);
@@ -297,6 +394,10 @@ void proc_re(char *source, re *re, char *msg) {
         if (key)
             free(key);
 
+    } else {
+        if (re_ret != PCRE_ERROR_NOMATCH) {
+            logw(logh, LOG_ERR, "pcre_exec() returned %d", re_ret);
+        }
     }
     free(filter_matches);
 }
@@ -422,7 +523,7 @@ void tail_lines(tfile *tf, void (*callback)(tfile *, char *)) {
 #endif
 
     close(fd);
-    logw(logh, LOG_DEBUG, "new tail pos: %ld size: %ld", tf->pos, st.st_size);
+    logw(logh, LOG_DEBUG, "%s new tail pos: %ld size: %ld", tf->name, tf->pos, st.st_size);
 }
 
 #ifdef SYSTEMD
@@ -483,13 +584,12 @@ void tail_journal(sd_journal *j) {
 // main loop
 // at this point we have all the config and log initialized
 int react_main() {
-    struct pollfd pw[POLL_FD_CNT]; // used to store: 0:inotify and 1:journal file descriptors and to poll for read/delete events
     int timeout = -1; // for poll(), will be the smallest after considering reset_list, expire_hits and LOG_CREATE_INTERVAL
     unsigned int tf_cnt_exist = 0; // number of monitored files that exist
+    struct pollfd pw[POLL_FD_CNT]; // used to store: 0:inotify and 1:journal file descriptors and to poll for read/delete events
+    memset(&pw, 0, POLL_FD_CNT*sizeof(struct pollfd));
 
     logw(logh, LOG_INFO, "Starting reactd");
-
-    dprint("Global options:\nversion: %u.%u\npidfile: %s\nlogging: %s\nloglevel: %s\n", cfg.version_major, cfg.version_minor, cfg.pidfile, logdst_str(cfg.logdst), loglevel_str(cfg.loglevel));
 
     if (tf_cnt > 0) {
         // Initialize global inotify fd and poll structure
@@ -560,7 +660,17 @@ int react_main() {
     char inotify_buf[ 100 * (sizeof(struct inotify_event) + NAME_MAX + 1)];
 
     while (!exit_flag) {
-        logw(logh, LOG_DEBUG, "Monitors: %u/%u sleeping %d milliseconds", tf_cnt_exist, tf_cnt, timeout);
+#ifdef DEBUG
+        if (log_above(logh, LOG_DEBUG))
+            react_debug();
+#endif
+
+        if (log_above(logh, LOG_DEBUG))
+            if (timeout < 0)
+                logw(logh, LOG_DEBUG, "Monitors: %u/%u sleeping indefinitely", tf_cnt_exist, tf_cnt);
+            else
+                logw(logh, LOG_DEBUG, "Monitors: %u/%u sleeping %d milliseconds", tf_cnt_exist, tf_cnt, timeout);
+
         int pollret = poll(pw, POLL_FD_CNT, timeout);
 
         // error or signal received
@@ -602,7 +712,7 @@ int react_main() {
                 }
             }
 
-            // fall through to update timeouts
+            // fall through to update poll timeout
         }
 
 
@@ -625,18 +735,16 @@ int react_main() {
                         logw(logh, LOG_DEBUG, "Inotify event pos %d/%ld: %#08x", e, len, ev->mask);
 
                         // find out which monitored file received the event
-                        tfile *cf = NULL;
                         for (unsigned int fi = 0; fi < tf_cnt; fi++) {
                             if (tf[fi]->watchfd == ev->wd) {
-                                cf = tf[fi];
-                                logw(logh, LOG_DEBUG, "%s got event", cf->name);
+                                logw(logh, LOG_DEBUG, "%s got event", tf[fi]->name);
 
                                 if (ev->mask & IN_MODIFY)
-                                    tail_lines(cf, proc_line);
+                                    tail_lines(tf[fi], proc_line);
 
                                 if (ev->mask & IN_IGNORED) {
-                                    logw(logh, LOG_DEBUG, "%s deleted", cf->name);
-                                    cf->watchfd = -1;
+                                    logw(logh, LOG_DEBUG, "%s deleted", tf[fi]->name);
+                                    tf[fi]->watchfd = -1;
                                     tf_cnt_exist--;
                                     if (timeout < 0)
                                         timeout = LOG_CREATE_SCAN_INTERVAL;
@@ -662,11 +770,25 @@ int react_main() {
         // update poll() timeout
         timeout = -1;
 
-        int t_expires = expire_list_next_expiracy(expires);
-        logw(logh, LOG_DEBUG, "Next hit expiracy: %d", t_expires);
+        time_t t_expires = expire_list_next_expiracy(expires);
+        time_t t_resets  = expire_list_next_expiracy(resets);
 
-        int t_resets = expire_list_next_expiracy(resets);
-        logw(logh, LOG_DEBUG, "Next reset run: %d", t_resets);
+        if (log_above(logh, LOG_DEBUG)) {
+            if (t_expires < 0)
+                logw(logh, LOG_DEBUG, "Next hit expiracy: not scheduled");
+            else {
+                char s[30];
+                my_ctime(&t_expires, s);
+                logw(logh, LOG_DEBUG, "Next hit expiracy: %s", s);
+            }
+            if (t_resets < 0)
+                logw(logh, LOG_DEBUG, "Next reset run: not scheduled");
+            else {
+                char s[30];
+                my_ctime(&t_resets, s);
+                logw(logh, LOG_DEBUG, "Next reset run: %s", s);
+            }
+        }
 
         if (t_expires > 0 || t_resets > 0) {
             if (t_expires > 0 && t_resets > 0) {
@@ -775,24 +897,68 @@ void free_config() {
 }
 
 int main(int argc, char **argv) {
-    dprint_init();
-    char *config = DEFAULT_CONFIG;
     int ch;
     int ret = 0;
 
+    char *arg_config    = NULL;
+    char arg_test       = 0;
+    char arg_background = 0;
+    char *arg_pidfile   = NULL;
+    int arg_logdst      = -1;
+    char *arg_logfile   = NULL;
+    int arg_loglevel    = -1;
+
     static const struct option longopts[] = {
         { "config",       required_argument, 0, 'c' },
+        { "test",         no_argument,       0, 't' },
+        { "background",   no_argument,       0, 'b' },
         { "pidfile",      required_argument, 0, 'p' },
-        { "statefile",    required_argument, 0, 's' },
+        { "logdst",       required_argument, 0, 'd' },
+        { "logfile",      required_argument, 0, 'o' },
+        { "loglevel",     required_argument, 0, 'l' },
         { "version",      no_argument,       0, 'V' },
         { "help",         no_argument,       0, 'h' },
         { NULL, 0, 0, 0 }
     };
 
-    while ((ch = getopt_long(argc, argv, "c:Vh", longopts, NULL)) != -1)
+    memset(&cfg, 0, sizeof(cfg));
+
+    // will only be set by parse_config if they are not set by cmd args
+    cfg.logdst = -1;
+    cfg.loglevel = -1;
+
+    while ((ch = getopt_long(argc, argv, "c:tbp:d:o:l:Vh", longopts, NULL)) != -1)
         switch((char)ch) {
             case 'c':
-                config = optarg;
+                arg_config = optarg;
+                break;
+            case 't':
+                arg_test = 1;
+                break;
+            case 'b':
+                arg_background = 1;
+                break;
+            case 'p':
+                arg_pidfile = optarg;
+                break;
+            case 'd':
+                arg_logdst = logdst_int(optarg);
+                if (arg_logdst == LOG_INVALID) {
+                    fprintf(stderr, "Invalid log destintion\n");
+                    usage(stderr);
+                    exit(1);
+                }
+                break;
+            case 'o':
+                arg_logfile = optarg;
+                break;
+            case 'l':
+                arg_loglevel = loglevel_int(optarg);
+                if (arg_loglevel == LOG_INVALID) {
+                    fprintf(stderr, "Invalid log level\n");
+                    usage(stderr);
+                    exit(1);
+                }
                 break;
             case 'V':
                 printf("reactd version %s\n", VERSION);
@@ -802,35 +968,78 @@ int main(int argc, char **argv) {
             default:
                 usage(stderr);
         }
+    if (arg_config == NULL) {
+        fprintf(stderr, "No config file specifed\n");
+        usage(stderr);
+        exit(1);
+    }
 
-        // must be called before parse_config()
-        pcre_tables = (unsigned char *)pcre_maketables();
+    // must be called before parse_config()
+    pcre_tables = (unsigned char *)pcre_maketables();
 
-        memset(&cfg, 0, sizeof(cfg));
-        ret |= parse_config(config);
+    ret |= parse_config(arg_config);
 
+    // args not set via command-line will be taken from config or defaults
+    if (arg_logdst == -1)
+        arg_logdst = (cfg.logdst != 0) ? cfg.logdst : DEFAULT_LOGDST;
+    if (arg_loglevel == -1)
+        arg_loglevel = (cfg.loglevel != 0) ? cfg.loglevel : DEFAULT_LOGLEVEL;
+    if (arg_logdst == LOG_TO_FILE && arg_logfile == NULL)
+        if (cfg.logfile)
+            arg_logfile = cfg.logfile;
+        else {
+            fprintf(stderr, "No log file specified\n");
+            usage(stderr);
+            ret = 1;
+        }
+
+    if (ret == 0 && !arg_test) {
+        logh = log_open(arg_logdst, arg_loglevel, cfg.logprefix, arg_logfile);
+        dprint("Logging: %s\nLoglevel: %s\n", logdst_str(logh->dst), loglevel_str(logh->level));
+
+        if (arg_background) {
+            if (0 > daemon(0, 1)) {
+                logw(logh, LOG_ERR, "Error becoming daemon: %s", strerror(errno));
+                ret = 1;
+            }
+        }
+        if (arg_pidfile) {
+            FILE *fh = fopen(arg_pidfile, "w");
+            if (fh == NULL) {
+                logw(logh, LOG_ERR, "Error creating to pidfile %s: %s", arg_pidfile, strerror(errno));
+                ret = 1;
+            } else {
+                if (0 > fprintf(fh, "%d\n", getpid())) {
+                    logw(logh, LOG_ERR, "Error writing to pidfile %s: %s", arg_pidfile, strerror(errno));
+                    ret = 1;
+                }
+                fclose(fh);
+            }
+        }
         if (ret == 0) {
-            logh = log_open(cfg.logdst, cfg.loglevel, cfg.logprefix, cfg.logfile);
             signal(SIGCHLD, SIG_IGN);
             signal(SIGINT,  react_stop);
             signal(SIGTERM, react_stop);
+            signal(SIGUSR1, react_debug);
             ret |= react_main();
+            signal(SIGUSR1, SIG_DFL);
             signal(SIGTERM, SIG_DFL);
             signal(SIGINT,  SIG_DFL);
             signal(SIGCHLD, SIG_DFL);
-            log_close(logh);
         }
+        log_close(logh);
+    }
 
-        free_config();
+    if (resets)
+        expire_list_free(resets, reset_free);
+    if (expires)
+        expire_list_free(expires, expires_run);
 
-        dprint("freeing memory");
-        if (resets)
-            expire_list_free(resets, reset_free);
-        if (expires)
-            expire_list_free(expires, expires_run);
+    dprint("freeing memory");
+    free_config();
 
-        if (pcre_tables)
-            pcre_free((void *)pcre_tables);
+    if (pcre_tables)
+        pcre_free((void *)pcre_tables);
 
     return ret;
 }
