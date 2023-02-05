@@ -1,4 +1,4 @@
-CFLAGS = -pipe -ggdb
+CFLAGS = -pipe -O3
 FLEXFLAGS =
 BISONFLAGS =
 
@@ -6,13 +6,13 @@ PROGS = reactd
 TESTS = test_expire_list test_ring
 
 all: $(PROGS)
-tests: CFLAGS += -DDEBUG_EXPIRE_LIST -DDEBUG_RING
+tests: override CFLAGS += -DDEBUG_EXPIRE_LIST -DDEBUG_RING
 tests: $(TESTS)
 # all: reactd keylist_test threshold_test subst_test
 
-debug: CFLAGS += -DDEBUG -ggdb
-debug: FLEXFLAGS += --debug
-debug: BISONFLAGS += --debug
+debug: override CFLAGS += -DDEBUG -ggdb
+debug: override FLEXFLAGS += --debug
+debug: override BISONFLAGS += --debug
 debug: all
 	@true
 
@@ -20,23 +20,24 @@ debug: all
 # NOSYSTEMD=1 make
 ifeq ($(NOSYSTEMD),)
 ifneq (,$(wildcard /usr/lib/libsystemd.so))
-  M4FLAGS += -DSYSTEMD
-  CFLAGS  += -DSYSTEMD
-  LDFLAGS += -lsystemd
+  override M4FLAGS += -DSYSTEMD
+  override CFLAGS  += -DSYSTEMD
+  override LDFLAGS += -lsystemd
 endif
 endif
 
 ifneq ($(STATIC),)
-  LDFLAGS+=-static
-  PKGCONFIG_ARGS+=--static
+  override LDFLAGS+=-static
+  override PKGCONFIG_ARGS+=--static
 endif
 # LDFLAGS_pcre = $(shell pcre-config --libs)
 LDFLAGS_pcre = $(shell pkg-config --libs $(PKGCONFIG_ARGS) libpcre)
 
 ifeq ($(DEBUG),)
-  CFLAGS += -ggdb -O3 -std=gnu99
+  CFLAGS +=
 else
-  CFLAGS += -ggdb -std=gnu99 -DDEBUG -DDEBUG_EXPIRE_LIST -DDEBUG_RING -DDEBUG_HASH -DDEBUG_BTREE -DDEBUG_PCRE_SUBST
+  override CFLAGS += -ggdb -std=gnu99 -DDEBUG -DDEBUG_EXPIRE_LIST -DDEBUG_RING -DDEBUG_HASH -DDEBUG_BTREE -DDEBUG_PCRE_SUBST
+  override M4FLAGS += -DDEBUG
 endif
 
 objects_reactd = reactd_conf.tab.o reactd_conf.lex.yy.o reactd.o avl.o pcre_subst.o debug.o log.o ring.o expire_list.o
