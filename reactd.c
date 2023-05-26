@@ -43,15 +43,16 @@ static volatile sig_atomic_t exit_flag = 0;
 
 static void __attribute__ ((__noreturn__)) usage(FILE *out)
 {
-    fprintf(out, "\nUsage:\nreactd [option] file\n");
+    fprintf(out, "\nUsage:\nreactd [option]\n");
 
     fprintf(out,
         "\nOptions:\n"
         " -c --config FILE    configuration file\n"
         " -t --test           syntax test configuration file and exit\n"
+        " -b --background     run in background\n"
         " -p --pidfile FILE   pid file\n"
         " -d --logdst         one of: syslog, file, stdout, stderr\n"
-        " -f --logfile        output file when logging to a file\n"
+        " -o --logfile        output file when logging to a file\n"
         " -l --loglevel       one of: emerg, alert, crit, err, warn, notice, info, debug\n"
         " -V --version        output version information and exit\n"
         " -h --help           display this help and exit\n\n"
